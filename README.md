@@ -1,56 +1,72 @@
-# Welcome to your Expo app 👋
+# LendMate
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+LendMate is a mobile-first loan application and loan-management prototype built with Expo and React Native. It presents separate borrower and lender/administrator experiences. Current sample data and workflow actions are stored only in the running app session.
 
-## Get started
+## Technology Stack
 
-1. Install dependencies
+| Component | Technology |
+| --- | --- |
+| Application type | Mobile application |
+| Mobile framework | React Native |
+| Development platform | Expo (SDK 57) |
+| Programming language | TypeScript |
+| Authentication | Firebase Authentication (planned; not connected) |
+| File storage | Firebase Storage (planned; not connected) |
+| Backend/API | Node.js with Express (planned; not connected) |
+| Relational database | MySQL (planned; not connected) |
+| Database language | SQL |
+| Development environment | Visual Studio Code |
+| Target testing devices | Android emulator and physical Android device |
 
-   ```bash
-   npm install
-   ```
+The intended architecture is a React Native/Expo client using Firebase Authentication for identity and Firebase Storage for borrower-submitted files. The client will call a Node.js/Express API for authorization, loan decisions, payment records, and reporting; the API will own access to MySQL. The mobile client must not connect directly to MySQL or contain database credentials.
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Run Locally
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+For the browser prototype:
 
-### Other setup steps
+```bash
+npm run web
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Run the current project checks:
 
-## Learn more
+```bash
+npx tsc --noEmit
+npx expo lint
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## Prototype Workflows
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+The app opens on the LendMate splash screen. Choose Borrower or Lender / Admin on the login screen to open the corresponding local demo.
 
-## Join the community
+### Borrower
 
-Join our community of developers creating universal apps.
+- Login and account registration with name, email, phone, password, and password confirmation fields.
+- Borrower dashboard with active loan, remaining principal, next installment, application status, and quick actions.
+- Loan application with product, requested amount, term, purpose, and an estimated monthly payment.
+- Application status, loan details, installment schedule, notification list, payment history, and local payment submission.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+### Lender / Administrator
+
+- Admin dashboard with borrower, active-loan, pending-application, overdue, released, and outstanding totals.
+- Application list with View, Approve, and Reject actions; decisions update the local application record.
+- Borrower list with phone numbers and active-loan counts, plus borrower detail.
+- Loan management list with amount, interest, term, remaining balance, and status. Approving a demo application adds a loan record.
+
+## Demo Boundaries
+
+- No Firebase project, API server, or MySQL database is configured or contacted. Login/registration validates demo form input only; it does not authenticate identities or enforce roles.
+- Records and changes live in component memory and reset when the app reloads. They are not suitable for real borrowers or lending decisions.
+- Requirement submission is currently a text checklist. Actual document upload, private storage rules, and identity verification require the planned Firebase integration.
+- Payment records and schedule statuses are examples. No money is transferred or reconciled.
+- The application estimator is an illustrative value for the supplied ₱10,000 / 3-month screen example; the separately shown loan detail is also seeded sample data. Neither is a production quote or financial advice. Confirm the lender's pricing model and local requirements before implementing real repayment calculations.
+- Before production, implement server-side authentication/role authorization, validation, audit persistence, data retention/privacy rules, transaction handling, payment reconciliation, and tested SQL migrations/API contracts.
+
+## Planned Modules
+
+Splash, login, registration, borrower dashboard/application/status/loan/schedule screens, and admin dashboard/application/borrower/loan screens are represented in the mobile prototype. Persistent storage, real authentication, role authorization, document upload, payment verification, API integration, and production security remain future implementation work.
