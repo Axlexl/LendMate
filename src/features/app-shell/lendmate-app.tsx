@@ -6,7 +6,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { registerWithEmail, signInWithEmail, signOut, onAuthChange, acceptTerms, fetchUserProfile, useGoogleSignIn, handleGoogleResponse, type UserProfile } from '@/services/auth';
 import { AppIcon, Avatar, BrandMark, Btn, DetailRow, InputField, LoadingOverlay, LogoutModal, NavBar, PageTitle, StatusBadge, TermsScreen } from './components';
-import { initialApplication, adminApplications, initialAdminLoans, borrowers, seedReviews, installments, todayLong, money, initials, type IconName, type Role, type Screen, type Review, type ApplicationRecord, type AdminLoanRecord } from './model';
+import { adminApplications, initialAdminLoans, borrowers, seedReviews, installments, todayLong, money, initials, type IconName, type Role, type Screen, type Review, type ApplicationRecord, type AdminLoanRecord } from './model';
 import { ThemeContext, palettes } from './theme';
 import { createStyles } from './styles';
 // ─── Main app ─────────────────────────────────────────────────────────────────
@@ -111,18 +111,19 @@ export default function LendMateApp() {
 
   const toggleDark = () => setIsDark((v) => !v);
   const [loanProduct, setLoanProduct] = useState('Personal Loan');
-  const [loanAmount, setLoanAmount] = useState('10000');
+  const [loanAmount, setLoanAmount] = useState('');
   const [loanTerm, setLoanTerm] = useState(3);
   const [loanPurpose, setLoanPurpose] = useState('Emergency');
-  const [application, setApplication] = useState(initialApplication);
+  const [application, setApplication] = useState<ApplicationRecord | null>(null);
   const [applicationDecision, setApplicationDecision] = useState<'APPROVED' | 'REJECTED' | null>(null);
+  const [approvedLoan, setApprovedLoan] = useState<AdminLoanRecord | null>(null);
   const [paymentSubmitted, setPaymentSubmitted] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState('GCash');
   const [payRef, setPayRef] = useState('');
   const [payError, setPayError] = useState('');
-  const [loanRemaining, setLoanRemaining] = useState(7500);
+  const [loanRemaining, setLoanRemaining] = useState(0);
   const [selectedBorrower, setSelectedBorrower] = useState(borrowers[0]);
   const [adminApps, setAdminApps] = useState(adminApplications);
   const [adminLoans, setAdminLoans] = useState(initialAdminLoans);
@@ -249,8 +250,16 @@ export default function LendMateApp() {
       return;
     }
     const appId = String(10026 + adminApps.filter((r) => Number(r.id) >= 10026).length);
-    setApplication({ id: appId, borrower: fullName, amount, product: loanProduct, status: 'UNDER REVIEW' });
-    setAdminApps((prev) => [{ id: appId, borrower: fullName, amount, product: loanProduct, status: 'PENDING' }, ...prev]);
+    const newApplication: ApplicationRecord = {
+      id: appId,
+      borrower: fullName,
+      amount,
+      product: loanProduct,
+      term: loanTerm,
+      status: 'UNDER REVIEW',
+    };
+    setApplication(newApplication);
+    setAdminApps((prev) => [{ ...newApplication, status: 'PENDING' }, ...prev]);
     setApplicationDecision(null);
     goTo('application-status');
   };
@@ -259,19 +268,29 @@ export default function LendMateApp() {
     const updated = { ...record, status };
     setAdminApps((prev) => prev.map((item) => item.id === record.id ? updated : item));
     setSelectedApp(updated);
-    if (record.id === application.id) { setApplication({ ...application, status }); setApplicationDecision(status); }
+    if (application && record.id === application.id) {
+      setApplication(updated);
+      setApplicationDecision(status);
+    }
     if (status === 'APPROVED') {
+      const interest = Math.round(record.amount * 0.1);
+      const totalPayable = record.amount + interest;
       const newLoan: AdminLoanRecord = {
         id: `1${record.id}`, borrower: record.borrower, amount: record.amount,
-        interest: Math.round(record.amount * 0.1), term: 3,
-        remaining: Math.round(record.amount * 0.75), status: 'ACTIVE',
+        interest, term: record.term ?? 3, remaining: totalPayable, status: 'ACTIVE',
       };
       setAdminLoans((prev) => [newLoan, ...prev]);
       setSelectedLoan(newLoan);
+      if (application?.id === record.id) {
+        setApprovedLoan(newLoan);
+        setLoanRemaining(totalPayable);
+      }
     }
   };
 
-  const monthlyEst = Math.round((Number(loanAmount.replace(/,/g, '')) * 1.05) / loanTerm);
+  const monthlyEst = loanAmount
+    ? Math.round((Number(loanAmount.replace(/,/g, '')) * 1.1) / loanTerm)
+    : 0;
 
   // ── Shared page header ──────────────────────────────────────────────────────
   const Header = ({ bell = true }: { bell?: boolean }) => (
@@ -923,19 +942,26 @@ export default function LendMateApp() {
           <Text style={[sh.greetingSub, { color: p.muted }]}>Here&apos;s your loan at a glance.</Text>
         </View>
 
-        {/* Hero card — always dark navy, unchanged */}
         <View style={sh.heroCard}>
           <View style={sh.heroCardTop}>
-            <Text style={sh.heroEyebrow}>ACTIVE LOAN</Text>
-            <StatusBadge status="ACTIVE" />
+            <Text style={sh.heroEyebrow}>{approvedLoan ? 'ACTIVE LOAN' : 'LOAN BALANCE'}</Text>
+            {(approvedLoan || application) && (
+              <StatusBadge status={approvedLoan ? (loanRemaining === 0 ? 'PAID' : 'ACTIVE') : applicationDecision ?? application?.status ?? 'PENDING'} />
+            )}
           </View>
-          <Text style={sh.heroAmount}>{money(10000)}</Text>
-          <Text style={sh.heroCaption}>Personal Loan · #10025</Text>
+          <Text style={sh.heroAmount}>{money(loanRemaining)}</Text>
+          <Text style={sh.heroCaption}>
+            {approvedLoan
+              ? `${application?.product ?? 'Loan'} · #${approvedLoan.id}`
+              : application
+                ? `Application ${applicationDecision === 'REJECTED' ? 'was not approved' : 'awaiting review'}`
+                : 'No active loan'}
+          </Text>
           <View style={sh.heroDivider} />
           <View style={sh.heroBottom}>
             <View>
-              <Text style={sh.heroSmallLabel}>Remaining principal</Text>
-              <Text style={sh.heroBalance}>{money(6500)}</Text>
+              <Text style={sh.heroSmallLabel}>{approvedLoan ? 'Remaining balance' : 'Current balance'}</Text>
+              <Text style={sh.heroBalance}>{money(loanRemaining)}</Text>
             </View>
             <View style={sh.heroIconBubble}>
               <AppIcon name="wallet" size={20} color={p.greenPale} />
@@ -943,44 +969,58 @@ export default function LendMateApp() {
           </View>
         </View>
 
-        {/* Next payment */}
-        <Pressable style={({ pressed }) => [sh.nextPayCard, { backgroundColor: p.surface, borderColor: p.line }, pressed && sh.cardPressed]} onPress={() => goTo('schedule')}>
-          <View style={[sh.nextPayIcon, { backgroundColor: p.greenPale }]}>
-            <AppIcon name="calendar" size={18} color={p.green} />
-          </View>
-          <View style={sh.nextPayCopy}>
-            <Text style={[sh.eyebrowSmall, { color: p.muted }]}>NEXT PAYMENT DUE</Text>
-            <Text style={[sh.nextPayAmount, { color: p.navy }]}>{money(1100)}</Text>
-            <Text style={[sh.nextPayDate, { color: p.muted }]}>October 15, 2026</Text>
-          </View>
-          <AppIcon name="arrow" size={17} color={p.muted} />
-        </Pressable>
+        {approvedLoan && loanRemaining > 0 && (
+          <Pressable style={({ pressed }) => [sh.nextPayCard, { backgroundColor: p.surface, borderColor: p.line }, pressed && sh.cardPressed]} onPress={() => goTo('schedule')}>
+            <View style={[sh.nextPayIcon, { backgroundColor: p.greenPale }]}>
+              <AppIcon name="calendar" size={18} color={p.green} />
+            </View>
+            <View style={sh.nextPayCopy}>
+              <Text style={[sh.eyebrowSmall, { color: p.muted }]}>LOAN PAYMENT SCHEDULE</Text>
+              <Text style={[sh.nextPayAmount, { color: p.navy }]}>{money(Math.ceil((approvedLoan.amount + approvedLoan.interest) / approvedLoan.term))}</Text>
+              <Text style={[sh.nextPayDate, { color: p.muted }]}>{approvedLoan.term}-month repayment term</Text>
+            </View>
+            <AppIcon name="arrow" size={17} color={p.muted} />
+          </Pressable>
+        )}
 
         {/* Actions */}
         <View style={sh.actionRow}>
-          <Btn title="Apply for Loan" onPress={() => goTo('apply')} />
-          <Btn title="View Loan" onPress={() => goTo('loan-details')} variant="secondary" />
+          {!application && !approvedLoan && <Btn title="Apply for Loan" onPress={() => goTo('apply')} />}
+          {approvedLoan && <Btn title="View Loan" onPress={() => goTo('loan-details')} />}
+          {application && !approvedLoan && <Btn title="Application Status" onPress={() => goTo('application-status')} />}
+          {(application || approvedLoan) && <Btn title="Apply Again" onPress={() => goTo('apply')} variant="secondary" />}
         </View>
 
-        <Pressable style={({ pressed }) => [sh.ghostRow, pressed && { backgroundColor: p.greenPale }]} onPress={() => goTo('payments')}>
-          <AppIcon name="file" size={16} color={p.navy} />
-          <Text style={[sh.ghostRowText, { color: p.navy }]}>Payment History</Text>
-          <AppIcon name="arrow" size={15} color={p.muted} />
-        </Pressable>
+        {approvedLoan && (
+          <Pressable style={({ pressed }) => [sh.ghostRow, pressed && { backgroundColor: p.greenPale }]} onPress={() => goTo('payments')}>
+            <AppIcon name="file" size={16} color={p.navy} />
+            <Text style={[sh.ghostRowText, { color: p.navy }]}>Payment History</Text>
+            <AppIcon name="arrow" size={15} color={p.muted} />
+          </Pressable>
+        )}
 
         {/* Application summary */}
         <View style={sh.sectionRow}>
           <Text style={[sh.sectionLabel, { color: p.navy }]}>Application</Text>
-          <Pressable onPress={() => goTo('application-status')}><Text style={[sh.sectionLink, { color: p.greenDark }]}>View</Text></Pressable>
+          {application && (
+            <Pressable onPress={() => goTo('application-status')}><Text style={[sh.sectionLink, { color: p.greenDark }]}>View</Text></Pressable>
+          )}
         </View>
-        <Pressable style={({ pressed }) => [sh.summaryCard, { backgroundColor: p.surface, borderColor: p.line }, pressed && sh.cardPressed]} onPress={() => goTo('application-status')}>
-          <View style={[sh.summaryIcon, { backgroundColor: p.greenPale }]}><AppIcon name="file" size={17} color={p.green} /></View>
-          <View style={sh.summaryCopy}>
-            <Text style={[sh.summaryTitle, { color: p.text }]}>Application #{application.id}</Text>
-            <Text style={[sh.summarySub, { color: p.muted }]}>Submitted {application.id === '10025' ? 'October 2, 2026' : todayLong}</Text>
+        {application ? (
+          <Pressable style={({ pressed }) => [sh.summaryCard, { backgroundColor: p.surface, borderColor: p.line }, pressed && sh.cardPressed]} onPress={() => goTo('application-status')}>
+            <View style={[sh.summaryIcon, { backgroundColor: p.greenPale }]}><AppIcon name="file" size={17} color={p.green} /></View>
+            <View style={sh.summaryCopy}>
+              <Text style={[sh.summaryTitle, { color: p.text }]}>Application #{application.id}</Text>
+              <Text style={[sh.summarySub, { color: p.muted }]}>Requested {money(application.amount)} · {application.term ?? 3} months</Text>
+            </View>
+            <StatusBadge status={applicationDecision ?? application.status} />
+          </Pressable>
+        ) : (
+          <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.green }]}>
+            <Text style={[sh.infoBoxTitle, { color: p.navy }]}>No application yet</Text>
+            <Text style={[sh.infoBoxBody, { color: p.muted }]}>Choose an amount and repayment term with Apply for Loan. Your application will be sent to the administrator for review.</Text>
           </View>
-          <StatusBadge status={applicationDecision ?? application.status} />
-        </Pressable>
+        )}
 
         {/* Review prompt */}
         <View style={sh.sectionRow}>
@@ -1079,8 +1119,10 @@ export default function LendMateApp() {
 
           <View style={[sh.estimateCard, { backgroundColor: p.greenPale }]}>
             <Text style={[sh.estimateLabel, { color: p.greenDark }]}>ESTIMATED MONTHLY PAYMENT</Text>
-            <Text style={[sh.estimateAmount, { color: p.navy }]}>{money(monthlyEst)}</Text>
-            <Text style={[sh.estimateNote, { color: p.muted }]}>Illustration only. Final terms set after review.</Text>
+            <Text style={[sh.estimateAmount, { color: p.navy }]}>{monthlyEst ? money(monthlyEst) : '—'}</Text>
+            <Text style={[sh.estimateNote, { color: p.muted }]}>
+              {monthlyEst ? 'Illustration only. Final terms set after review.' : 'Enter an amount to see an estimate.'}
+            </Text>
           </View>
 
           {formError ? <View style={sh.errorBox}><Text style={sh.errorText}>{formError}</Text></View> : null}
@@ -1098,32 +1140,43 @@ export default function LendMateApp() {
       <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
         <PageTitle title="Application Status" subtitle="Track your application progress." onBack={() => goTo('dashboard')} />
 
-        <View style={[sh.statusHero, { backgroundColor: p.greenPale }]}>
-          <View style={[sh.statusIcon, { backgroundColor: p.surface }]}>
-            <AppIcon name={applicationDecision === 'APPROVED' ? 'check' : 'clock'} size={24} color={p.green} />
+        {application ? (
+          <>
+            <View style={[sh.statusHero, { backgroundColor: p.greenPale }]}>
+              <View style={[sh.statusIcon, { backgroundColor: p.surface }]}>
+                <AppIcon name={applicationDecision === 'APPROVED' ? 'check' : 'clock'} size={24} color={p.green} />
+              </View>
+              <Text style={[sh.statusLabel, { color: p.greenDark }]}>{applicationDecision ?? application.status}</Text>
+              <Text style={[sh.statusDesc, { color: p.text }]}>
+                {applicationDecision === 'APPROVED' ? 'Your application has been approved and your loan is now active.' :
+                  applicationDecision === 'REJECTED' ? 'Please contact the lending team for next steps.' :
+                    'Our team is currently reviewing your application.'}
+              </Text>
+            </View>
+
+            <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+              <DetailRow label="Application #" value={application.id} />
+              <DetailRow label="Loan product" value={application.product} />
+              <DetailRow label="Requested amount" value={money(application.amount)} />
+              <DetailRow label="Repayment term" value={`${application.term ?? 3} Months`} />
+              <DetailRow label="Submitted" value={todayLong} />
+              <DetailRow label="Status" value={applicationDecision ?? application.status} last />
+            </View>
+
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.green }]}>
+              <Text style={[sh.infoBoxTitle, { color: p.navy }]}>What happens next?</Text>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>You&apos;ll be notified when your status changes. Keep your profile and supporting documents up to date.</Text>
+            </View>
+
+            {applicationDecision === 'APPROVED' && <Btn title="View Approved Loan" onPress={() => goTo('loan-details')} />}
+          </>
+        ) : (
+          <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.green }]}>
+            <Text style={[sh.infoBoxTitle, { color: p.navy }]}>No application submitted</Text>
+            <Text style={[sh.infoBoxBody, { color: p.muted }]}>You have no loan balance. Choose the amount and repayment term you need, then submit it for administrator review.</Text>
+            <Btn title="Apply for Loan" onPress={() => goTo('apply')} />
           </View>
-          <Text style={[sh.statusLabel, { color: p.greenDark }]}>{applicationDecision ?? application.status}</Text>
-          <Text style={[sh.statusDesc, { color: p.text }]}>
-            {applicationDecision === 'APPROVED' ? 'Your application has been approved.' :
-              applicationDecision === 'REJECTED' ? 'Please contact the lending team for next steps.' :
-                'Our team is currently reviewing your application.'}
-          </Text>
-        </View>
-
-        <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-          <DetailRow label="Application #" value={application.id} />
-          <DetailRow label="Loan product" value={application.product} />
-          <DetailRow label="Amount" value={money(application.amount)} />
-          <DetailRow label="Submitted" value={application.id === '10025' ? 'October 2, 2026' : 'October 11, 2026'} />
-          <DetailRow label="Status" value={applicationDecision ?? application.status} last />
-        </View>
-
-        <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.green }]}>
-          <Text style={[sh.infoBoxTitle, { color: p.navy }]}>What happens next?</Text>
-          <Text style={[sh.infoBoxBody, { color: p.muted }]}>You&apos;ll be notified when your status changes. Keep your profile and supporting documents up to date.</Text>
-        </View>
-
-        {applicationDecision === 'APPROVED' && <Btn title="View Approved Loan" onPress={() => goTo('loan-details')} />}
+        )}
       </ScrollView>
       <NavBar role="borrower" screen={screen} onSelect={goTo} />
     </>
@@ -1131,7 +1184,24 @@ export default function LendMateApp() {
 
   // ── Loan Details ─────────────────────────────────────────────────────────────
   const renderLoanDetails = () => {
-    const paidPercent = Math.round(((11000 - loanRemaining) / 11000) * 100);
+    if (!approvedLoan) {
+      return (
+        <>
+          <Header />
+          <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+            <PageTitle title="Loan Details" subtitle="No approved loan yet" onBack={() => goTo('dashboard')} />
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.green }]}>
+              <Text style={[sh.infoBoxTitle, { color: p.navy }]}>No loan available</Text>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>Your account is currently at zero balance. Once an administrator approves your application, the approved amount and repayment schedule will appear here.</Text>
+            </View>
+          </ScrollView>
+          <NavBar role="borrower" screen={screen} onSelect={goTo} />
+        </>
+      );
+    }
+
+    const totalDue = approvedLoan.amount + approvedLoan.interest;
+    const paidPercent = Math.round(((totalDue - loanRemaining) / totalDue) * 100);
 
     const submitPayment = () => {
       const amt = Number(payAmount.replace(/,/g, ''));
@@ -1150,30 +1220,30 @@ export default function LendMateApp() {
       <>
         <Header />
         <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-          <PageTitle title="Loan Details" subtitle="Personal Loan · #10025" onBack={() => goTo('dashboard')} />
+          <PageTitle title="Loan Details" subtitle={`${application?.product ?? 'Loan'} · #${approvedLoan.id}`} onBack={() => goTo('dashboard')} />
 
           <View style={sh.loanHero}>
             <View style={sh.loanHeroTop}>
               <Text style={sh.heroEyebrow}>LOAN AMOUNT</Text>
               <StatusBadge status={loanRemaining === 0 ? 'PAID' : 'ACTIVE'} />
             </View>
-            <Text style={sh.loanHeroAmount}>{money(10000)}</Text>
+            <Text style={sh.loanHeroAmount}>{money(approvedLoan.amount)}</Text>
             <Text style={sh.loanHeroSub}>Remaining balance {money(loanRemaining)}</Text>
             <View style={sh.progressTrack}>
-              <View style={[sh.progressFill, { width: `${paidPercent}%` }]} />
+              <View style={[sh.progressFill, { width: `${Math.min(100, Math.max(0, paidPercent))}%` }]} />
             </View>
             <View style={sh.progressLabels}>
               <Text style={sh.progressLabel}>{paidPercent}% paid</Text>
-              <Text style={sh.progressLabel}>Released Oct 1, 2026</Text>
+              <Text style={sh.progressLabel}>Released {todayLong}</Text>
             </View>
           </View>
 
           <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-            <DetailRow label="Principal" value={money(10000)} />
-            <DetailRow label="Interest (10%)" value={money(1000)} />
-            <DetailRow label="Total Payable" value={money(11000)} />
+            <DetailRow label="Principal" value={money(approvedLoan.amount)} />
+            <DetailRow label="Interest (10%)" value={money(approvedLoan.interest)} />
+            <DetailRow label="Total Payable" value={money(totalDue)} />
             <DetailRow label="Remaining" value={money(loanRemaining)} />
-            <DetailRow label="Term" value="3 Months" />
+            <DetailRow label="Term" value={`${approvedLoan.term} Months`} />
             <DetailRow label="Status" value={loanRemaining === 0 ? 'PAID' : 'ACTIVE'} last />
           </View>
 
@@ -1181,13 +1251,13 @@ export default function LendMateApp() {
             <View style={[sh.payNowCard, { backgroundColor: p.surface, borderColor: p.line }]}>
               <View style={sh.payNowLeft}>
                 <Text style={[sh.payNowLabel, { color: p.muted }]}>NEXT INSTALLMENT</Text>
-                <Text style={[sh.payNowAmount, { color: p.navy }]}>{money(Math.min(loanRemaining, 3667))}</Text>
-                <Text style={[sh.payNowDue, { color: p.muted }]}>Due October 15, 2026</Text>
+                <Text style={[sh.payNowAmount, { color: p.navy }]}>{money(Math.min(loanRemaining, Math.ceil(totalDue / approvedLoan.term)))}</Text>
+                <Text style={[sh.payNowDue, { color: p.muted }]}>Due end of month</Text>
               </View>
               <View style={sh.payNowActions}>
                 <Btn
                   title="Pay Now"
-                  onPress={() => { setPayAmount(String(Math.min(loanRemaining, 3667))); setShowPayModal(true); }}
+                  onPress={() => { setPayAmount(String(Math.min(loanRemaining, Math.ceil(totalDue / approvedLoan.term)))); setShowPayModal(true); }}
                   size="sm"
                 />
                 <Pressable
@@ -1292,101 +1362,133 @@ export default function LendMateApp() {
   };
 
   // ── Schedule ─────────────────────────────────────────────────────────────────
-  const renderSchedule = () => (
-    <>
-      <Header />
-      <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-        <PageTitle title="Payment Schedule" subtitle="Loan #10025 · 3 installments" onBack={() => goTo('loan-details')} />
-
-        <View style={[sh.scheduleBanner, { backgroundColor: p.greenPale }]}>
-          <Text style={[sh.eyebrowSmall, { color: p.muted }]}>NEXT DUE</Text>
-          <Text style={[sh.scheduleDueDate, { color: p.navy }]}>October 15</Text>
-          <Text style={[sh.scheduleDueSub, { color: p.muted }]}>Upcoming installment · {money(1100)} due</Text>
-        </View>
-
-        <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-          {installments.map((item, i) => (
-            <View key={item.number} style={[sh.installRow, i === installments.length - 1 && sh.installRowLast]}>
-              <View style={sh.installNum}>
-                <Text style={sh.installNumText}>{String(item.number).padStart(2, '0')}</Text>
-              </View>
-              <View style={sh.installCopy}>
-                <Text style={[sh.installTitle, { color: p.text }]}>Installment {item.number}</Text>
-                <Text style={[sh.installDate, { color: p.muted }]}>{item.due}, 2026</Text>
-              </View>
-              <View style={sh.installRight}>
-                <Text style={[sh.installAmount, { color: p.navy }]}>{money(item.amount)}</Text>
-                <Text style={[sh.installStatus, item.status === 'PAID' ? sh.paidText : sh.pendingText]}>
-                  {item.status}
-                </Text>
-              </View>
+  const renderSchedule = () => {
+    if (!approvedLoan) {
+      return (
+        <>
+          <Header />
+          <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+            <PageTitle title="Payment Schedule" subtitle="No approved loan" onBack={() => goTo('dashboard')} />
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.green }]}>
+              <Text style={[sh.infoBoxTitle, { color: p.navy }]}>No payment schedule yet</Text>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>Your approved loan details will appear here after the admin accepts your application.</Text>
             </View>
-          ))}
-        </View>
+          </ScrollView>
+          <NavBar role="borrower" screen={screen} onSelect={goTo} />
+        </>
+      );
+    }
 
-        <View style={[sh.callout, { backgroundColor: p.surface, borderColor: p.line }]}>
-          <Text style={[sh.calloutTitle, { color: p.navy }]}>Record a payment</Text>
-          <Text style={[sh.calloutBody, { color: p.muted }]}>Submit a payment reference for lender verification.</Text>
-          <Btn title="Submit Payment" onPress={() => goTo('payments')} />
-        </View>
-      </ScrollView>
-      <NavBar role="borrower" screen={screen} onSelect={goTo} />
-    </>
-  );
+    const totalDue = approvedLoan.amount + approvedLoan.interest;
+    const baseInstallment = Math.floor(totalDue / approvedLoan.term);
+    const remainder = totalDue % approvedLoan.term;
+    return (
+      <>
+        <Header />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+          <PageTitle title="Payment Schedule" subtitle={`Loan #${approvedLoan.id} · ${approvedLoan.term} installments`} onBack={() => goTo('loan-details')} />
+
+          <View style={[sh.scheduleBanner, { backgroundColor: p.greenPale }]}>
+            <Text style={[sh.eyebrowSmall, { color: p.muted }]}>NEXT DUE</Text>
+            <Text style={[sh.scheduleDueDate, { color: p.navy }]}>Next installment</Text>
+            <Text style={[sh.scheduleDueSub, { color: p.muted }]}>Estimated amount · {money(baseInstallment + (remainder > 0 ? 1 : 0))}</Text>
+          </View>
+
+          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+            {Array.from({ length: approvedLoan.term }, (_, idx) => idx + 1).map((item, i) => (
+              <View key={item} style={[sh.installRow, i === approvedLoan.term - 1 && sh.installRowLast]}>
+                <View style={sh.installNum}>
+                  <Text style={sh.installNumText}>{String(item).padStart(2, '0')}</Text>
+                </View>
+                <View style={sh.installCopy}>
+                  <Text style={[sh.installTitle, { color: p.text }]}>Installment {item}</Text>
+                  <Text style={[sh.installDate, { color: p.muted }]}>Month {item} of {approvedLoan.term}</Text>
+                </View>
+                <View style={sh.installRight}>
+                  <Text style={[sh.installAmount, { color: p.navy }]}>{money(baseInstallment + (item <= remainder ? 1 : 0))}</Text>
+                  <Text style={[sh.installStatus, sh.pendingText]}>PENDING</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          <View style={[sh.callout, { backgroundColor: p.surface, borderColor: p.line }]}>
+            <Text style={[sh.calloutTitle, { color: p.navy }]}>Record a payment</Text>
+            <Text style={[sh.calloutBody, { color: p.muted }]}>Submit a payment reference for lender verification.</Text>
+            <Btn title="Submit Payment" onPress={() => goTo('payments')} />
+          </View>
+        </ScrollView>
+        <NavBar role="borrower" screen={screen} onSelect={goTo} />
+      </>
+    );
+  };
 
   // ── Payments ─────────────────────────────────────────────────────────────────
-  const renderPayments = () => (
-    <>
-      <Header />
-      <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-        <PageTitle title="Payment History" subtitle="Your submitted and completed payments." onBack={() => goTo('dashboard')} />
-
-        {paymentSubmitted && (
-          <View style={[sh.successBanner, { backgroundColor: p.greenPale }]}>
-            <AppIcon name="check" size={16} color={p.greenDark} />
-            <Text style={[sh.successText, { color: p.greenDark }]}>Payment submitted for lender verification.</Text>
-          </View>
-        )}
-
-        <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-          {[
-            { date: 'October 1, 2026', amount: 3667, status: 'PAID', method: 'Bank transfer' },
-            {
-              date: 'October 11, 2026', amount: 1100,
-              status: paymentSubmitted ? 'PENDING VERIFICATION' : 'DUE',
-              method: paymentSubmitted ? 'GCash · Ref. LM-10025' : 'Not submitted',
-            },
-          ].map((entry, i, arr) => (
-            <View key={entry.date} style={[sh.historyRow, i === arr.length - 1 && sh.historyRowLast]}>
-              <View style={[sh.historyDot, entry.status === 'PAID' ? sh.historyDotPaid : sh.historyDotPending]}>
-                <AppIcon name={entry.status === 'PAID' ? 'check' : 'clock'} size={14}
-                  color={entry.status === 'PAID' ? p.greenDark : p.amber} />
-              </View>
-              <View style={sh.historyCopy}>
-                <Text style={[sh.historyDate, { color: p.text }]}>{entry.date}</Text>
-                <Text style={[sh.historyMethod, { color: p.muted }]}>{entry.method}</Text>
-              </View>
-              <View style={sh.historyRight}>
-                <Text style={[sh.historyAmount, { color: p.navy }]}>{money(entry.amount)}</Text>
-                <Text style={[sh.historyStatus, entry.status === 'PAID' ? sh.paidText : sh.pendingText]}>
-                  {entry.status}
-                </Text>
-              </View>
+  const renderPayments = () => {
+    if (!approvedLoan) {
+      return (
+        <>
+          <Header />
+          <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+            <PageTitle title="Payment History" subtitle="No payments yet" onBack={() => goTo('dashboard')} />
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.green }]}>
+              <Text style={[sh.infoBoxTitle, { color: p.navy }]}>No payments recorded</Text>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>When your loan is approved, your payment submissions and completed transactions will be listed here.</Text>
             </View>
-          ))}
-        </View>
+          </ScrollView>
+          <NavBar role="borrower" screen={screen} onSelect={goTo} />
+        </>
+      );
+    }
 
-        {!paymentSubmitted && (
-          <View style={[sh.callout, { backgroundColor: p.surface, borderColor: p.line }]}>
-            <Text style={[sh.calloutTitle, { color: p.navy }]}>Submit a payment</Text>
-            <Text style={[sh.calloutBody, { color: p.muted }]}>Demo flow only — no funds are transferred.</Text>
-            <Btn title="Submit ₱1,100 Payment" onPress={() => setPaymentSubmitted(true)} />
+    return (
+      <>
+        <Header />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+          <PageTitle title="Payment History" subtitle="Your submitted and completed payments." onBack={() => goTo('dashboard')} />
+
+          {paymentSubmitted && (
+            <View style={[sh.successBanner, { backgroundColor: p.greenPale }]}>
+              <AppIcon name="check" size={16} color={p.greenDark} />
+              <Text style={[sh.successText, { color: p.greenDark }]}>Payment submitted for lender verification.</Text>
+            </View>
+          )}
+
+          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+            {[
+              { date: todayLong, amount: Math.ceil((approvedLoan.amount + approvedLoan.interest) / approvedLoan.term), status: paymentSubmitted ? 'PENDING VERIFICATION' : 'DUE', method: paymentSubmitted ? 'GCash · Ref. LM-10025' : 'Not submitted' },
+            ].map((entry, i, arr) => (
+              <View key={entry.date} style={[sh.historyRow, i === arr.length - 1 && sh.historyRowLast]}>
+                <View style={[sh.historyDot, entry.status === 'PAID' ? sh.historyDotPaid : sh.historyDotPending]}>
+                  <AppIcon name={entry.status === 'PAID' ? 'check' : 'clock'} size={14}
+                    color={entry.status === 'PAID' ? p.greenDark : p.amber} />
+                </View>
+                <View style={sh.historyCopy}>
+                  <Text style={[sh.historyDate, { color: p.text }]}>{entry.date}</Text>
+                  <Text style={[sh.historyMethod, { color: p.muted }]}>{entry.method}</Text>
+                </View>
+                <View style={sh.historyRight}>
+                  <Text style={[sh.historyAmount, { color: p.navy }]}>{money(entry.amount)}</Text>
+                  <Text style={[sh.historyStatus, entry.status === 'PAID' ? sh.paidText : sh.pendingText]}>
+                    {entry.status}
+                  </Text>
+                </View>
+              </View>
+            ))}
           </View>
-        )}
-      </ScrollView>
-      <NavBar role="borrower" screen={screen} onSelect={goTo} />
-    </>
-  );
+
+          {!paymentSubmitted && (
+            <View style={[sh.callout, { backgroundColor: p.surface, borderColor: p.line }]}>
+              <Text style={[sh.calloutTitle, { color: p.navy }]}>Submit a payment</Text>
+              <Text style={[sh.calloutBody, { color: p.muted }]}>Demo flow only — no funds are transferred.</Text>
+              <Btn title="Submit Payment" onPress={() => setPaymentSubmitted(true)} />
+            </View>
+          )}
+        </ScrollView>
+        <NavBar role="borrower" screen={screen} onSelect={goTo} />
+      </>
+    );
+  };
 
   // ── Notifications ────────────────────────────────────────────────────────────
   const renderNotifications = () => {

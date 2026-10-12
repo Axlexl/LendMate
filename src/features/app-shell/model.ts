@@ -22,6 +22,7 @@ export type Review = {
 
 export type ApplicationRecord = {
   id: string; borrower: string; amount: number; product: string;
+  term?: number;
   status: 'PENDING' | 'UNDER REVIEW' | 'APPROVED' | 'REJECTED';
 };
 
@@ -31,11 +32,6 @@ export type AdminLoanRecord = {
 };
 
 // ─── Seed data ────────────────────────────────────────────────────────────────
-
-export const initialApplication: ApplicationRecord = {
-  id: '10025', borrower: 'Christian Santiago',
-  amount: 10000, product: 'Personal Loan', status: 'UNDER REVIEW',
-};
 
 export const adminApplications: ApplicationRecord[] = [
   { id: '1025', borrower: 'Juan Dela Cruz', amount: 10000, product: 'Personal Loan', status: 'PENDING' },
@@ -82,4 +78,3 @@ export function money(value: number) {
 export function initials(name: string, max = 2) {
   return name.split(' ').map((p) => p[0]).slice(0, max).join('');
 }
-
