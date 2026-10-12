@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { initializeAuth, indexedDBLocalPersistence } from 'firebase/auth';
+import { initializeAuth, getAuth, indexedDBLocalPersistence } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -12,11 +12,15 @@ const firebaseConfig = {
   measurementId: 'G-NTTDE749T1',
 };
 
-// Prevent double-init during hot reload
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-export const auth = initializeAuth(app, {
-  persistence: indexedDBLocalPersistence,
-});
+// Use getAuth if already initialized (handles hot reload), otherwise init fresh
+let auth: ReturnType<typeof getAuth>;
+try {
+  auth = initializeAuth(app, { persistence: indexedDBLocalPersistence });
+} catch {
+  auth = getAuth(app);
+}
 
+export { auth };
 export const db = getFirestore(app);

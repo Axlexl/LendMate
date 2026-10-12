@@ -1,10 +1,29 @@
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
 import Svg, { Ellipse, Path } from 'react-native-svg';
 
+import { createAdminAccount } from '@/lib/auth';
+
 SplashScreen.preventAutoHideAsync();
+
+// ─── One-time admin seed ───────────────────────────────────────────────────────
+// This runs once on first launch. If the account already exists Firebase will
+// return auth/email-already-in-use and nothing happens. Safe to leave in.
+const ADMIN_EMAIL    = 'admin@lendmate.ph';
+const ADMIN_PASSWORD = 'LendMate@Admin2026';
+const ADMIN_NAME     = 'LendMate Admin';
+
+async function seedAdminAccount() {
+  const result = await createAdminAccount(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME);
+  if (result.ok) {
+    console.log('[LendMate] Admin account created:', ADMIN_EMAIL);
+  } else if (!result.error.includes('already registered')) {
+    console.warn('[LendMate] Admin seed skipped:', result.error);
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const palette = {
   navy: '#103B5D',
@@ -26,25 +45,25 @@ function AnimatedBrandMark() {
           toValue: 1,
           tension: 70,
           friction: 8,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(opacity, {
           toValue: 1,
           duration: 380,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
       ]),
       // Wordmark fades in
       Animated.timing(wordmarkOpacity, {
         toValue: 1,
         duration: 280,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }),
       // Tagline fades in
       Animated.timing(taglineOpacity, {
         toValue: 1,
         duration: 260,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }),
     ]).start();
   }, [opacity, scale, taglineOpacity, wordmarkOpacity]);
@@ -104,12 +123,12 @@ function PulsingDots() {
           Animated.timing(dot, {
             toValue: 1,
             duration: 340,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(dot, {
             toValue: 0.3,
             duration: 340,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ])
       )
@@ -134,6 +153,9 @@ export default function RootLayout() {
   const loadingOpacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    // Seed the admin account once (safe to call repeatedly — idempotent)
+    seedAdminAccount();
+
     // Give the loading screen at least 2.2 s so the animation plays fully,
     // then fade it out and reveal the app.
     const timer = setTimeout(async () => {
@@ -143,12 +165,12 @@ export default function RootLayout() {
         Animated.timing(loadingOpacity, {
           toValue: 0,
           duration: 340,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(screenOpacity, {
           toValue: 1,
           duration: 340,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
       ]).start(() => setAppReady(true));
     }, 2200);
@@ -183,7 +205,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.white,
   },
   fill: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   loadingScreen: {
     backgroundColor: palette.white,

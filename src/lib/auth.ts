@@ -66,6 +66,9 @@ export type UserProfile = {
   phone: string;
   role: AppRole;
   termsAccepted: boolean;
+  dateOfBirth?: string;   // ISO date string: YYYY-MM-DD
+  idType?: string;        // e.g. "Philippine Passport"
+  idNumber?: string;      // e.g. "P1234567A"
   createdAt: Timestamp | null;
 };
 
@@ -96,6 +99,7 @@ async function createUserProfile(
   fullName: string,
   phone: string,
   role: AppRole = 'borrower',
+  extra?: { dateOfBirth?: string; idType?: string; idNumber?: string },
 ): Promise<UserProfile> {
   const now = serverTimestamp();
 
@@ -106,6 +110,9 @@ async function createUserProfile(
     phone,
     role,
     termsAccepted: false,
+    ...(extra?.dateOfBirth && { dateOfBirth: extra.dateOfBirth }),
+    ...(extra?.idType && { idType: extra.idType }),
+    ...(extra?.idNumber && { idNumber: extra.idNumber }),
     createdAt: now,
   };
 
@@ -142,15 +149,12 @@ export async function registerWithEmail(
   email: string,
   phone: string,
   password: string,
+  extra?: { dateOfBirth?: string; idType?: string; idNumber?: string },
 ): Promise<AuthResult> {
   try {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
-
-    // Set the display name on the Firebase Auth profile
     await updateProfile(cred.user, { displayName: fullName });
-
-    const profile = await createUserProfile(cred.user.uid, email, fullName, phone, 'borrower');
-
+    const profile = await createUserProfile(cred.user.uid, email, fullName, phone, 'borrower', extra);
     return { ok: true, user: cred.user, profile };
   } catch (e) {
     return { ok: false, error: mapAuthError(e) };
@@ -200,7 +204,11 @@ export async function sendPasswordReset(email: string): Promise<{ ok: boolean; e
  * Pass `response` to handleGoogleResponse() in a useEffect.
  */
 export function useGoogleSignIn() {
-  const redirectUri = AuthSession.makeRedirectUri({ scheme: 'lendmate' });
+  const redirectUri = AuthSession.makeRedirectUri({
+    scheme: 'lendmate',
+    // On web use the current origin; on native use the Expo proxy
+    ...(typeof window !== 'undefined' ? { useProxy: false } : { useProxy: true }),
+  });
 
   const discovery: AuthSession.DiscoveryDocument = {
     authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -274,6 +282,43 @@ export async function signOut(): Promise<void> {
   await firebaseSignOut(auth);
 }
 
+// ─── Create admin account (run once to seed the admin user) ──────────────────
+
+/**
+ * Call this ONCE to create the admin account in Firebase Auth + Firestore.
+ * After running it, remove the call — it is not needed again.
+ *
+ * Usage (from your app's dev screen or a one-off script):
+ *   await createAdminAccount('admin@lendmate.ph', 'YourSecurePassword123!', 'LendMate Admin');
+ */
+export async function createAdminAccount(
+  email: string,
+  password: string,
+  fullName: string = 'LendMate Admin',
+): Promise<AuthResult> {
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    await updateProfile(cred.user, { displayName: fullName });
+
+    const now = serverTimestamp();
+    const profile = {
+      uid: cred.user.uid,
+      email,
+      fullName,
+      phone: '',
+      role: 'admin' as AppRole,
+      termsAccepted: true,   // admin skips T&C flow
+      createdAt: now,
+    };
+
+    await setDoc(doc(db, 'users', cred.user.uid), profile);
+
+    return { ok: true, user: cred.user, profile: { ...profile, createdAt: null } };
+  } catch (e) {
+    return { ok: false, error: mapAuthError(e) };
+  }
+}
+
 // ─── Auth state listener ──────────────────────────────────────────────────────
 
 /**
@@ -297,9 +342,9 @@ function mapAuthError(e: unknown): string {
     'auth/operation-not-allowed':   'Email/password sign-in is not enabled. Contact support.',
 
     // Sign-in
-    'auth/user-not-found':          'No account found with that email.',
-    'auth/wrong-password':          'Incorrect password. Please try again.',
-    'auth/invalid-credential':      'Incorrect email or password.',
+    'auth/user-not-found':          'No account found with that email. Please register first.',
+    'auth/wrong-password':          'Wrong password. Please try again.',
+    'auth/invalid-credential':      'Wrong email or password. Please check and try again.',
     'auth/user-disabled':           'This account has been disabled. Contact support.',
 
     // Rate limiting / network
@@ -318,6 +363,11 @@ function mapAuthError(e: unknown): string {
 
   // Log unknown codes in development
   if (__DEV__ && code) console.warn('[LendMate Auth] Unhandled Firebase error code:', code);
+
+  // If it looks like a credential error, give a helpful message
+  if (code.includes('credential') || code.includes('password') || code.includes('user')) {
+    return 'Wrong email or password. Please check and try again.';
+  }
 
   return 'Something went wrong. Please try again.';
 }
