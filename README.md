@@ -40,6 +40,28 @@ npx tsc --noEmit
 npx expo lint
 ```
 
+## Source Structure
+
+```text
+src/
+  app/                  Expo Router routes and root layout
+  constants/            Shared app-wide values
+  features/
+    app-shell/
+      components.tsx    App-shell UI primitives and navigation
+      model.ts          Screen types, sample records, and formatters
+      styles.ts         App-shell styles
+      theme.tsx         Light/dark palettes and theme context
+      lendmate-app.tsx  Screen state and application workflows
+      index.tsx         Feature entry point used by the route
+  services/             Firebase setup and authentication operations
+```
+
+Keep route files in `src/app/` focused on routing, place feature-specific UI
+and workflows under `src/features/`, and keep backend or platform integrations
+in `src/services/`. Add shared component, hook, or asset folders when the app
+has reusable code or assets to put there rather than keeping empty folders.
+
 ## Prototype Workflows
 
 The app opens on the LendMate splash screen. Choose Borrower or Lender / Admin on the login screen to open the corresponding local demo.

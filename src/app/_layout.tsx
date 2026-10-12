@@ -1,10 +1,11 @@
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Animated, Platform, StyleSheet, View } from 'react-native';
 import Svg, { Ellipse, Path } from 'react-native-svg';
 
-import { createAdminAccount } from '@/lib/auth';
+import { appColors } from '@/constants/colors';
+import { createAdminAccount } from '@/services/auth';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -25,17 +26,13 @@ async function seedAdminAccount() {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const palette = {
-  navy: '#103B5D',
-  green: '#15934B',
-  white: '#FFFFFF',
-};
+const palette = appColors;
 
 function AnimatedBrandMark() {
-  const scale = useRef(new Animated.Value(0.82)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-  const wordmarkOpacity = useRef(new Animated.Value(0)).current;
-  const taglineOpacity = useRef(new Animated.Value(0)).current;
+  const scale = useMemo(() => new Animated.Value(0.82), []);
+  const opacity = useMemo(() => new Animated.Value(0), []);
+  const wordmarkOpacity = useMemo(() => new Animated.Value(0), []);
+  const taglineOpacity = useMemo(() => new Animated.Value(0), []);
 
   useEffect(() => {
     Animated.sequence([
@@ -109,11 +106,10 @@ function AnimatedBrandMark() {
 }
 
 function PulsingDots() {
-  const dots = [
-    useRef(new Animated.Value(0.3)).current,
-    useRef(new Animated.Value(0.3)).current,
-    useRef(new Animated.Value(0.3)).current,
-  ];
+  const dots = useMemo(
+    () => [new Animated.Value(0.3), new Animated.Value(0.3), new Animated.Value(0.3)],
+    []
+  );
 
   useEffect(() => {
     const staggered = dots.map((dot, i) =>
@@ -149,8 +145,8 @@ function PulsingDots() {
 
 export default function RootLayout() {
   const [appReady, setAppReady] = useState(false);
-  const screenOpacity = useRef(new Animated.Value(0)).current;
-  const loadingOpacity = useRef(new Animated.Value(1)).current;
+  const screenOpacity = useMemo(() => new Animated.Value(0), []);
+  const loadingOpacity = useMemo(() => new Animated.Value(1), []);
 
   useEffect(() => {
     // Seed the admin account once (safe to call repeatedly — idempotent)
