@@ -2247,30 +2247,201 @@ export default function LendMateApp() {
         </>
       );
     }
+
+    // Local edit state
+    const [editMode, setEditMode] = React.useState(false);
+    const [editAmount, setEditAmount] = React.useState(String(selectedLoan.amount));
+    const [editInterestRate, setEditInterestRate] = React.useState(
+      String(Math.round((selectedLoan.interest / selectedLoan.amount) * 100))
+    );
+    const [editTerm, setEditTerm] = React.useState(String(selectedLoan.term));
+    const [editStatus, setEditStatus] = React.useState<'ACTIVE' | 'PAID'>(selectedLoan.status);
+    const [editError, setEditError] = React.useState('');
+
+    const saveChanges = () => {
+      const amount = Number(editAmount.replace(/,/g, ''));
+      const rate = Number(editInterestRate) / 100;
+      const term = Number(editTerm);
+      if (!amount || amount < 100) { setEditError('Enter a valid amount (min ₱100).'); return; }
+      if (isNaN(rate) || rate < 0 || rate > 1) { setEditError('Enter interest rate between 0 and 100%.'); return; }
+      if (!term || term < 1 || term > 120) { setEditError('Enter a term between 1 and 120 months.'); return; }
+      const interest = Math.round(amount * rate);
+      const totalPayable = amount + interest;
+      const updatedLoan: AdminLoanRecord = {
+        ...selectedLoan,
+        amount,
+        interest,
+        term,
+        remaining: editStatus === 'PAID' ? 0 : Math.min(selectedLoan.remaining, totalPayable),
+        status: editStatus,
+      };
+      setAdminLoans((prev) => prev.map((l) => l.id === selectedLoan.id ? updatedLoan : l));
+      setSelectedLoan(updatedLoan);
+      setEditMode(false);
+      setEditError('');
+    };
+
+    const deleteLoan = () => {
+      setAdminLoans((prev) => prev.filter((l) => l.id !== selectedLoan.id));
+      goTo('admin-loans');
+    };
+
+    const totalPayable = selectedLoan.amount + selectedLoan.interest;
+    const paidPercent = totalPayable > 0 ? Math.round(((totalPayable - selectedLoan.remaining) / totalPayable) * 100) : 0;
+
     return (
       <>
         <Header />
-        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-          <PageTitle title="Loan Details" subtitle={`#${selectedLoan.id} · ${selectedLoan.borrower}`} onBack={() => goTo('admin-loans')} />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]} keyboardShouldPersistTaps="handled">
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            <View style={{ flex: 1 }}>
+              <Pressable onPress={() => goTo('admin-loans')} style={[sh.backBtn, { backgroundColor: p.background }]}>
+                <AppIcon name="back" size={20} color={p.navy} />
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={() => { setEditMode((v) => !v); setEditError(''); }}
+              style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9, borderWidth: 1.5, borderColor: editMode ? p.muted : p.green, backgroundColor: editMode ? p.background : p.greenPale }}
+            >
+              <Text style={{ color: editMode ? p.muted : p.greenDark, fontSize: 13, fontWeight: '700' }}>
+                {editMode ? 'Cancel' : 'Edit Loan'}
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Hero card */}
           <View style={sh.loanHero}>
             <View style={sh.loanHeroTop}>
-              <Text style={sh.heroEyebrow}>LOAN AMOUNT</Text>
+              <Text style={sh.heroEyebrow}>LOAN #{selectedLoan.id} · {selectedLoan.borrower}</Text>
               <StatusBadge status={selectedLoan.status} />
             </View>
             <Text style={sh.loanHeroAmount}>{money(selectedLoan.amount)}</Text>
-            <Text style={sh.loanHeroSub}>Remaining {money(selectedLoan.remaining)}</Text>
+            <Text style={sh.loanHeroSub}>
+              Remaining {money(selectedLoan.remaining)} · {paidPercent}% paid
+            </Text>
+            <View style={sh.progressTrack}>
+              <View style={[sh.progressFill, { width: `${paidPercent}%` }]} />
+            </View>
           </View>
-          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-            <DetailRow label="Borrower" value={selectedLoan.borrower} />
-            <DetailRow label="Principal" value={money(selectedLoan.amount)} />
-            <DetailRow label="Interest" value={money(selectedLoan.interest)} />
-            <DetailRow label="Total Payable" value={money(selectedLoan.amount + selectedLoan.interest)} />
-            <DetailRow label="Remaining" value={money(selectedLoan.remaining)} />
-            <DetailRow label="Term" value={`${selectedLoan.term} months`} />
-            <DetailRow label="Status" value={selectedLoan.status} last />
-          </View>
-          <Btn title="View Schedule" onPress={() => goTo('schedule')} />
-          <Btn title="Payment History" onPress={() => goTo('payments')} variant="secondary" />
+
+          {/* ── View mode ─────────────────────────────────────────────── */}
+          {!editMode ? (
+            <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+              <DetailRow label="Borrower" value={selectedLoan.borrower} />
+              <DetailRow label="Principal" value={money(selectedLoan.amount)} />
+              <DetailRow label="Interest Rate" value={`${Math.round((selectedLoan.interest / selectedLoan.amount) * 100)}%`} />
+              <DetailRow label="Total Interest" value={money(selectedLoan.interest)} />
+              <DetailRow label="Total Payable" value={money(totalPayable)} />
+              <DetailRow label="Remaining" value={money(selectedLoan.remaining)} />
+              <DetailRow label="Term" value={`${selectedLoan.term} months`} />
+              <DetailRow label="Status" value={selectedLoan.status} last />
+            </View>
+          ) : (
+            /* ── Edit mode ──────────────────────────────────────────── */
+            <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.green }]}>
+              <View style={{ padding: 4, paddingBottom: 10 }}>
+                <Text style={{ color: p.green, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginBottom: 12 }}>
+                  EDITING LOAN #{selectedLoan.id}
+                </Text>
+
+                {/* Principal Amount */}
+                <Text style={[sh.fieldLabel, { color: p.text, marginBottom: 6 }]}>Principal Amount (₱)</Text>
+                <View style={[sh.amountRow, { backgroundColor: p.background, borderColor: p.line, marginBottom: 14 }]}>
+                  <Text style={[sh.currencySign, { color: p.greenDark }]}>₱</Text>
+                  <TextInput
+                    value={editAmount}
+                    onChangeText={setEditAmount}
+                    keyboardType="numeric"
+                    placeholder="10,000"
+                    placeholderTextColor={p.mutedLight}
+                    style={[sh.amountInput, { color: p.navy }]}
+                  />
+                </View>
+
+                {/* Interest Rate */}
+                <Text style={[sh.fieldLabel, { color: p.text, marginBottom: 6 }]}>Interest Rate (%)</Text>
+                <View style={[sh.amountRow, { backgroundColor: p.background, borderColor: p.line, marginBottom: 14 }]}>
+                  <TextInput
+                    value={editInterestRate}
+                    onChangeText={setEditInterestRate}
+                    keyboardType="numeric"
+                    placeholder="10"
+                    placeholderTextColor={p.mutedLight}
+                    style={[sh.amountInput, { color: p.navy, fontSize: 18 }]}
+                  />
+                  <Text style={{ color: p.muted, fontSize: 18, fontWeight: '700', marginLeft: 4 }}>%</Text>
+                </View>
+
+                {/* Computed interest preview */}
+                {editAmount && editInterestRate ? (
+                  <View style={[sh.estimateCard, { backgroundColor: p.greenPale, marginBottom: 14 }]}>
+                    <Text style={[sh.estimateLabel, { color: p.greenDark }]}>COMPUTED INTEREST</Text>
+                    <Text style={[sh.estimateAmount, { color: p.navy }]}>
+                      {money(Math.round(Number(editAmount.replace(/,/g, '')) * (Number(editInterestRate) / 100)))}
+                    </Text>
+                    <Text style={[sh.estimateNote, { color: p.muted }]}>
+                      Total payable: {money(
+                        Number(editAmount.replace(/,/g, '')) +
+                        Math.round(Number(editAmount.replace(/,/g, '')) * (Number(editInterestRate) / 100))
+                      )}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {/* Term */}
+                <Text style={[sh.fieldLabel, { color: p.text, marginBottom: 6 }]}>Repayment Term (months)</Text>
+                <View style={sh.termRow}>
+                  {[1, 3, 6, 12, 24].map((t) => (
+                    <Pressable key={t} onPress={() => setEditTerm(String(t))}
+                      style={[sh.termChip, String(t) === editTerm && sh.termChipActive, { flex: 0, width: 52 }]}>
+                      <Text style={[sh.termChipNum, String(t) === editTerm && sh.termChipNumActive]}>{t}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={[sh.amountRow, { backgroundColor: p.background, borderColor: p.line, marginBottom: 14 }]}>
+                  <TextInput
+                    value={editTerm}
+                    onChangeText={setEditTerm}
+                    keyboardType="numeric"
+                    placeholder="Custom months"
+                    placeholderTextColor={p.mutedLight}
+                    style={[sh.amountInput, { color: p.navy, fontSize: 16 }]}
+                  />
+                </View>
+
+                {/* Status */}
+                <Text style={[sh.fieldLabel, { color: p.text, marginBottom: 8 }]}>Loan Status</Text>
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+                  {(['ACTIVE', 'PAID'] as const).map((s) => (
+                    <Pressable key={s} onPress={() => setEditStatus(s)}
+                      style={{ flex: 1, height: 44, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center',
+                        borderColor: editStatus === s ? p.green : p.line,
+                        backgroundColor: editStatus === s ? p.greenPale : p.background }}>
+                      <Text style={{ color: editStatus === s ? p.greenDark : p.muted, fontWeight: '700', fontSize: 13 }}>{s}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                {editError ? (
+                  <View style={[sh.errorBox, { backgroundColor: p.redPale, marginBottom: 10 }]}>
+                    <Text style={[sh.errorText, { color: p.red }]}>{editError}</Text>
+                  </View>
+                ) : null}
+
+                <Btn title="Save Changes" onPress={saveChanges} />
+              </View>
+            </View>
+          )}
+
+          {/* Actions */}
+          {!editMode && (
+            <>
+              <Btn title="Payment History" onPress={() => goTo('payments')} variant="secondary" />
+              <View style={{ marginTop: 10 }}>
+                <Btn title="Delete This Loan" onPress={deleteLoan} variant="danger" />
+              </View>
+            </>
+          )}
         </ScrollView>
         <NavBar role="admin" screen={screen} onSelect={goTo} />
       </>
