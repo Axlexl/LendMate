@@ -27,8 +27,8 @@ export function createStyles(palette: Palette) {
   headerIconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: palette.background, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   headerIconBtnPressed: { backgroundColor: palette.greenMid },
   notifDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: palette.green, position: 'absolute', top: 7, right: 7, borderWidth: 1.5, borderColor: palette.surface },
-  profileBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.navy, alignItems: 'center', justifyContent: 'center' },
-  profileInitials: { color: palette.surface, fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  profileBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.navyCard, alignItems: 'center', justifyContent: 'center' },
+  profileInitials: { color: '#FFFFFF', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
 
   // buttons
   btn: { minHeight: 52, alignItems: 'center', justifyContent: 'center', borderRadius: 13, paddingHorizontal: 20, marginTop: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2 },
@@ -39,7 +39,7 @@ export function createStyles(palette: Palette) {
   btnDanger: { backgroundColor: palette.redPale, borderWidth: 1.5, borderColor: palette.red, shadowOpacity: 0 },
   btnPressed: { transform: [{ scale: 0.978 }], shadowOpacity: 0.08 },
   btnDisabled: { opacity: 0.42, shadowOpacity: 0 },
-  btnText: { color: palette.surface, fontWeight: '700', fontSize: 15, letterSpacing: 0.15 },
+  btnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15, letterSpacing: 0.15 },
   btnTextSm: { fontSize: 13 },
   btnTextSecondary: { color: palette.greenDark },
   btnTextGhost: { color: palette.navy },
@@ -196,15 +196,15 @@ export function createStyles(palette: Palette) {
   greetingSub: { color: palette.muted, fontSize: 14, marginTop: 3 },
 
   // hero card
-  heroCard: { backgroundColor: palette.navy, borderRadius: 18, padding: 20, marginBottom: 14 },
+  heroCard: { backgroundColor: palette.navyCard, borderRadius: 18, padding: 20, marginBottom: 14 },
   heroCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   heroEyebrow: { color: 'rgba(255,255,255,0.55)', fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  heroAmount: { color: palette.surface, fontSize: 32, fontWeight: '800', marginTop: 10, letterSpacing: -0.5 },
+  heroAmount: { color: '#FFFFFF', fontSize: 32, fontWeight: '800', marginTop: 10, letterSpacing: -0.5 },
   heroCaption: { color: 'rgba(255,255,255,0.6)', fontSize: 12, marginTop: 3 },
   heroDivider: { height: 1, backgroundColor: 'rgba(255,255,255,0.12)', marginVertical: 16 },
   heroBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   heroSmallLabel: { color: 'rgba(255,255,255,0.55)', fontSize: 11 },
-  heroBalance: { color: palette.surface, fontSize: 20, fontWeight: '800', marginTop: 3 },
+  heroBalance: { color: '#FFFFFF', fontSize: 20, fontWeight: '800', marginTop: 3 },
   heroIconBubble: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
 
   // next payment
@@ -277,9 +277,9 @@ export function createStyles(palette: Palette) {
   statusDesc: { color: palette.text, fontSize: 13, textAlign: 'center', marginTop: 6, lineHeight: 19 },
 
   // loan hero
-  loanHero: { backgroundColor: palette.navy, borderRadius: 18, padding: 20, marginBottom: 14 },
+  loanHero: { backgroundColor: palette.navyCard, borderRadius: 18, padding: 20, marginBottom: 14 },
   loanHeroTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  loanHeroAmount: { color: palette.surface, fontSize: 30, fontWeight: '800', marginTop: 8, letterSpacing: -0.5 },
+  loanheroAmount: { color: '#FFFFFF', fontSize: 30, fontWeight: '800', marginTop: 8, letterSpacing: -0.5 },
   loanHeroSub: { color: 'rgba(255,255,255,0.6)', fontSize: 13, marginTop: 3 },
   progressTrack: { height: 7, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 5, marginTop: 18, overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 5, backgroundColor: '#4DC87A' },
@@ -346,10 +346,10 @@ export function createStyles(palette: Palette) {
   statBarAmber: { backgroundColor: palette.amber },
   statLabel: { color: palette.muted, fontSize: 11, fontWeight: '700', letterSpacing: 0.3 },
   statVal: { color: palette.navy, fontSize: 22, fontWeight: '900', marginTop: 6 },
-  portfolioCard: { backgroundColor: palette.navy, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  portfolioCard: { backgroundColor: palette.navyCard, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   portfolioHalf: { flex: 1 },
   portfolioDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 16 },
-  portfolioAmt: { color: palette.surface, fontSize: 19, fontWeight: '900', marginTop: 5 },
+  portfolioAmt: { color: '#FFFFFF', fontSize: 19, fontWeight: '900', marginTop: 5 },
   portfolioOutstanding: { color: '#A5E1B6', fontSize: 19, fontWeight: '900', marginTop: 5 },
   adminListRow: { flexDirection: 'row', alignItems: 'center', gap: 11, minHeight: 66, borderBottomWidth: 1, borderBottomColor: palette.line },
   adminListCopy: { flex: 1 },
@@ -538,4 +538,7 @@ export function useAppStyles() {
   const palette = useContext(ThemeContext);
   return useMemo(() => createStyles(palette), [palette]);
 }
+
+
+
 

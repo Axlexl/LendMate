@@ -1,14 +1,14 @@
+import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
-import * as ImagePicker from 'expo-image-picker';
 
-import { registerWithEmail, signInWithEmail, signOut, onAuthChange, acceptTerms, fetchUserProfile, useGoogleSignIn, handleGoogleResponse, type UserProfile } from '@/services/auth';
+import { acceptTerms, fetchUserProfile, handleGoogleResponse, onAuthChange, registerWithEmail, signInWithEmail, signOut, useGoogleSignIn, type UserProfile } from '@/services/auth';
 import { AppIcon, Avatar, BrandMark, Btn, DetailRow, InputField, LoadingOverlay, LogoutModal, NavBar, PageTitle, StatusBadge, TermsScreen } from './components';
-import { adminApplications, initialAdminLoans, borrowers, seedReviews, installments, todayLong, money, initials, type IconName, type Role, type Screen, type Review, type ApplicationRecord, type AdminLoanRecord } from './model';
-import { ThemeContext, palettes } from './theme';
+import { adminApplications, borrowers, initialAdminLoans, initials, money, seedReviews, todayLong, type AdminLoanRecord, type ApplicationRecord, type IconName, type Review, type Role, type Screen } from './model';
 import { createStyles } from './styles';
+import { ThemeContext, palettes } from './theme';
 // ─── Main app ─────────────────────────────────────────────────────────────────
 
 export default function LendMateApp() {
@@ -45,6 +45,7 @@ export default function LendMateApp() {
   const [idType, setIdType] = useState('');
   const [idNumber, setIdNumber] = useState('');
   const [idPhotoUri, setIdPhotoUri] = useState<string | null>(null);
+  const [profilePhotoUri, setProfilePhotoUri] = useState<string | null>(null);
   // ────────────────────────────────────────────────────────────────────────────
   const [formLoading, setFormLoading] = useState(false);
 
@@ -124,15 +125,24 @@ export default function LendMateApp() {
   const [payRef, setPayRef] = useState('');
   const [payError, setPayError] = useState('');
   const [loanRemaining, setLoanRemaining] = useState(0);
-  const [selectedBorrower, setSelectedBorrower] = useState(borrowers[0]);
+  const [selectedBorrower, setSelectedBorrower] = useState<typeof borrowers[0] | null>(null);
+  // Real borrowers — grows as users register.
+  const [registeredBorrowers, setRegisteredBorrowers] = useState(borrowers);
   const [adminApps, setAdminApps] = useState(adminApplications);
   const [adminLoans, setAdminLoans] = useState(initialAdminLoans);
   const [selectedApp, setSelectedApp] = useState<ApplicationRecord | null>(null);
-  const [selectedLoan, setSelectedLoan] = useState<AdminLoanRecord>(initialAdminLoans[0]);
+  const [selectedLoan, setSelectedLoan] = useState<AdminLoanRecord | null>(null);
   const [reviews, setReviews] = useState<Review[]>(seedReviews);
   const [reviewStars, setReviewStars] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  // ── Select-delete state for admin ────────────────────────────────────────────
+  const [selectedAppIds, setSelectedAppIds] = useState<Set<string>>(new Set());
+  const [selectedBorrowerIds, setSelectedBorrowerIds] = useState<Set<string>>(new Set());
+  const [selectedReviewIds, setSelectedReviewIds] = useState<Set<string>>(new Set());
+  const [appSelectMode, setAppSelectMode] = useState(false);
+  const [borrowerSelectMode, setBorrowerSelectMode] = useState(false);
+  const [reviewSelectMode, setReviewSelectMode] = useState(false);
 
   const signIn = async () => {
     if (!email.includes('@') || password.length < 6) {
@@ -222,6 +232,12 @@ export default function LendMateApp() {
       setRole('borrower');
       setTermsAccepted(false);
       setFormError('');
+      // Add to the real borrowers list so admin sees them immediately
+      const uid = result.profile.uid;
+      setRegisteredBorrowers((prev) => {
+        if (prev.some((b) => b.id === uid)) return prev;
+        return [{ id: uid, name: result.profile.fullName, phone: result.profile.phone || '—', activeLoans: 0, status: 'ACTIVE' }, ...prev];
+      });
       goTo('terms');
     } else {
       skipAuthRedirect.current = false;
@@ -232,6 +248,8 @@ export default function LendMateApp() {
   const handleLogout = async () => {
     skipAuthRedirect.current = false;
     setShowLogout(false);
+    // Show loading screen while signing out
+    setTransitioning(true);
     await signOut();
     setFirebaseUser(null);
     setFullName('');
@@ -240,7 +258,10 @@ export default function LendMateApp() {
     setPassword('');
     setConfirmPassword('');
     setTermsAccepted(false);
-    goTo('splash');
+    setTimeout(() => {
+      setTransitioning(false);
+      goTo('splash');
+    }, 1400);
   };
 
   const submitApplication = () => {
@@ -785,51 +806,103 @@ export default function LendMateApp() {
       stars: s,
       count: reviews.filter((r) => r.stars === s).length,
     }));
+    const toggleSelectReview = (id: string) =>
+      setSelectedReviewIds((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    const deleteSelected = () => {
+      setReviews((prev) => prev.filter((r) => !selectedReviewIds.has(r.id)));
+      setSelectedReviewIds(new Set());
+      setReviewSelectMode(false);
+    };
+    const deleteAll = () => { setReviews([]); setSelectedReviewIds(new Set()); setReviewSelectMode(false); };
 
     return (
       <View style={[sh.flex, { backgroundColor: p.background }]}>
         <Header />
         <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-          <PageTitle title="Reviews" subtitle="All borrower ratings and comments." onBack={() => goTo('admin-dashboard')} />
-
-          {/* Aggregate hero */}
-          <View style={[sh.reviewAggCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-            <View style={sh.reviewAggLeft}>
-              <Text style={[sh.reviewAggScore, { color: p.navy }]}>{avg}</Text>
-              <View style={sh.reviewAggStars}>
-                {[1, 2, 3, 4, 5].map((s) => (
-                  <Svg key={s} width={16} height={16} viewBox="0 0 24 24">
-                    <Path
-                      d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-                      stroke={s <= Math.round(parseFloat(avg)) ? '#F4B400' : p.line}
-                      strokeWidth="1.5" strokeLinejoin="round"
-                      fill={s <= Math.round(parseFloat(avg)) ? '#F4B400' : 'transparent'}
-                    />
-                  </Svg>
-                ))}
-              </View>
-              <Text style={[sh.reviewAggCount, { color: p.muted }]}>{reviews.length} review{reviews.length !== 1 ? 's' : ''}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            <View>
+              <Text style={[sh.pageTitleText, { color: p.navy }]}>Reviews</Text>
+              <Text style={[sh.pageTitleSub, { color: p.muted }]}>All borrower ratings</Text>
             </View>
-            <View style={sh.reviewAggRight}>
-              {dist.map(({ stars: s, count }) => (
-                <View key={s} style={sh.reviewBarRow}>
-                  <Text style={[sh.reviewBarLabel, { color: p.muted }]}>{s}</Text>
-                  <View style={[sh.reviewBarTrack, { backgroundColor: p.line }]}>
-                    <View style={[sh.reviewBarFill, {
-                      width: reviews.length ? `${Math.round((count / reviews.length) * 100)}%` as any : '0%',
-                      backgroundColor: '#F4B400',
-                    }]} />
-                  </View>
-                  <Text style={[sh.reviewBarCount, { color: p.muted }]}>{count}</Text>
-                </View>
-              ))}
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              {reviews.length > 0 && (
+                <Pressable onPress={() => { setReviewSelectMode((v) => !v); setSelectedReviewIds(new Set()); }}>
+                  <Text style={{ color: reviewSelectMode ? p.muted : p.navy, fontSize: 13, fontWeight: '700' }}>
+                    {reviewSelectMode ? 'Cancel' : 'Select'}
+                  </Text>
+                </Pressable>
+              )}
+              {reviews.length > 0 && !reviewSelectMode && (
+                <Pressable onPress={deleteAll}>
+                  <Text style={{ color: p.red, fontSize: 13, fontWeight: '700' }}>Delete All</Text>
+                </Pressable>
+              )}
+              {reviewSelectMode && selectedReviewIds.size > 0 && (
+                <Pressable onPress={deleteSelected}
+                  style={{ backgroundColor: p.red, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 7 }}>
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Delete ({selectedReviewIds.size})</Text>
+                </Pressable>
+              )}
             </View>
           </View>
 
+          {/* Aggregate hero — only shown when there are reviews */}
+          {reviews.length > 0 && (
+            <View style={[sh.reviewAggCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+              <View style={sh.reviewAggLeft}>
+                <Text style={[sh.reviewAggScore, { color: p.navy }]}>{avg}</Text>
+                <View style={sh.reviewAggStars}>
+                  {[1, 2, 3, 4, 5].map((s) => (
+                    <Svg key={s} width={16} height={16} viewBox="0 0 24 24">
+                      <Path
+                        d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
+                        stroke={s <= Math.round(parseFloat(avg)) ? '#F4B400' : p.line}
+                        strokeWidth="1.5" strokeLinejoin="round"
+                        fill={s <= Math.round(parseFloat(avg)) ? '#F4B400' : 'transparent'}
+                      />
+                    </Svg>
+                  ))}
+                </View>
+                <Text style={[sh.reviewAggCount, { color: p.muted }]}>{reviews.length} review{reviews.length !== 1 ? 's' : ''}</Text>
+              </View>
+              <View style={sh.reviewAggRight}>
+                {dist.map(({ stars: s, count }) => (
+                  <View key={s} style={sh.reviewBarRow}>
+                    <Text style={[sh.reviewBarLabel, { color: p.muted }]}>{s}</Text>
+                    <View style={[sh.reviewBarTrack, { backgroundColor: p.line }]}>
+                      <View style={[sh.reviewBarFill, {
+                        width: reviews.length ? `${Math.round((count / reviews.length) * 100)}%` as any : '0%',
+                        backgroundColor: '#F4B400',
+                      }]} />
+                    </View>
+                    <Text style={[sh.reviewBarCount, { color: p.muted }]}>{count}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {reviews.length === 0 && (
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.muted }]}>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>No reviews yet.</Text>
+            </View>
+          )}
+
           {/* Individual reviews */}
-          {reviews.map((r) => (
-            <View key={r.id} style={[sh.reviewCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+          {reviews.map((r) => {
+            const isSelected = selectedReviewIds.has(r.id);
+            return (
+            <Pressable
+              key={r.id}
+              onPress={() => reviewSelectMode && toggleSelectReview(r.id)}
+              style={[sh.reviewCard, { backgroundColor: isSelected ? p.greenPale : p.surface, borderColor: isSelected ? p.green : p.line }]}
+            >
               <View style={sh.reviewCardHead}>
+                {reviewSelectMode && (
+                  <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: isSelected ? p.green : p.line, backgroundColor: isSelected ? p.green : p.surface, alignItems: 'center', justifyContent: 'center', marginRight: 4 }}>
+                    {isSelected && <AppIcon name="check" size={12} color="#fff" />}
+                  </View>
+                )}
                 <Avatar name={r.borrower} />
                 <View style={sh.reviewCardMeta}>
                   <Text style={[sh.reviewCardName, { color: p.text }]}>{r.borrower}</Text>
@@ -851,14 +924,9 @@ export default function LendMateApp() {
               {r.comment ? (
                 <Text style={[sh.reviewCardComment, { color: p.text }]}>{r.comment}</Text>
               ) : null}
-            </View>
-          ))}
-
-          {reviews.length === 0 && (
-            <View style={sh.reviewEmpty}>
-              <Text style={[sh.reviewEmptyText, { color: p.muted }]}>No reviews yet.</Text>
-            </View>
-          )}
+            </Pressable>
+            );
+          })}
         </ScrollView>
         <NavBar role="admin" screen={screen} onSelect={goTo} />
       </View>
@@ -867,18 +935,19 @@ export default function LendMateApp() {
 
   // ── Admin Payments screen ─────────────────────────────────────────────────────
   const renderAdminPayments = () => {
-    const allPayments = [
-      { id: 'PAY-001', borrower: 'Juan Dela Cruz', loanId: '10025', amount: 3667, date: 'October 1, 2026', method: 'Bank Transfer', status: 'PAID' },
-      { id: 'PAY-002', borrower: 'Maria Santos', loanId: '10024', amount: 5000, date: 'October 8, 2026', method: 'GCash', status: 'PAID' },
-      { id: 'PAY-003', borrower: 'Christian Santiago', loanId: '10025', amount: 1100, date: 'October 11, 2026', method: 'GCash · Ref. LM-10025', status: 'PENDING VERIFICATION' },
-      { id: 'PAY-004', borrower: 'Ana Lopez', loanId: '10023', amount: 3667, date: 'September 15, 2026', method: 'Bank Transfer', status: 'PAID' },
-      { id: 'PAY-005', borrower: 'Ana Lopez', loanId: '10023', amount: 3667, date: 'October 10, 2026', method: 'Over the counter', status: 'PAID' },
-    ];
+    // Build real payment records from actual admin loans
+    const allPayments = adminLoans.map((loan, i) => ({
+      id: `PAY-${loan.id}`,
+      borrower: loan.borrower,
+      loanId: loan.id,
+      amount: Math.ceil((loan.amount + loan.interest) / loan.term),
+      date: todayLong,
+      method: '—',
+      status: loan.status === 'PAID' ? 'PAID' : loan.remaining < loan.amount + loan.interest ? 'PARTIAL' : 'ACTIVE',
+    }));
 
-    const totalPaid = allPayments
-      .filter((p) => p.status === 'PAID')
-      .reduce((sum, p) => sum + p.amount, 0);
-    const pendingCount = allPayments.filter((p) => p.status === 'PENDING VERIFICATION').length;
+    const totalPaid = adminLoans.filter((l) => l.status === 'PAID').reduce((sum, l) => sum + l.amount + l.interest, 0);
+    const pendingCount = adminLoans.filter((l) => l.status === 'ACTIVE' && l.remaining > 0).length;
 
     return (
       <View style={[sh.flex, { backgroundColor: p.background }]}>
@@ -933,13 +1002,22 @@ export default function LendMateApp() {
   };
 
   // ── Borrower Dashboard ───────────────────────────────────────────────────────
-  const renderDashboard = () => (
+  const renderDashboard = () => {
+    const now = new Date();
+    const hour = now.getHours();
+    const greeting =
+      hour >= 5 && hour < 12 ? 'Good morning' :
+      hour >= 12 && hour < 17 ? 'Good afternoon' :
+      hour >= 17 && hour < 21 ? 'Good evening' : 'Good night';
+    const dateLabel = now.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric' });
+
+    return (
     <>
       <Header />
       <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]} showsVerticalScrollIndicator={false}>
         <View style={sh.greeting}>
-          <Text style={[sh.greetingTitle, { color: p.navy }]}>Good morning, {fullName.split(' ')[0]} 👋</Text>
-          <Text style={[sh.greetingSub, { color: p.muted }]}>Here&apos;s your loan at a glance.</Text>
+          <Text style={[sh.greetingTitle, { color: p.navy }]}>{greeting}, {fullName.split(' ')[0]}</Text>
+          <Text style={[sh.greetingSub, { color: p.muted }]}>{dateLabel}</Text>
         </View>
 
         <View style={sh.heroCard}>
@@ -1052,7 +1130,8 @@ export default function LendMateApp() {
       </ScrollView>
       <NavBar role="borrower" screen={screen} onSelect={goTo} />
     </>
-  );
+    );
+  };
 
   // ── Apply ────────────────────────────────────────────────────────────────────
   const renderApply = () => {
@@ -1560,10 +1639,12 @@ export default function LendMateApp() {
 
   // ── Admin Dashboard ───────────────────────────────────────────────────────────
   const renderAdminDashboard = () => {
-    const activeLoanDelta = adminLoans.filter((l) => l.status === 'ACTIVE').length - initialAdminLoans.filter((l) => l.status === 'ACTIVE').length;
-    const pendingDelta = adminApps.filter((a) => a.status === 'PENDING').length - adminApplications.filter((a) => a.status === 'PENDING').length;
-    const amountDelta = adminLoans.reduce((t, l) => t + l.amount, 0) - initialAdminLoans.reduce((t, l) => t + l.amount, 0);
-    const remainDelta = adminLoans.reduce((t, l) => t + l.remaining, 0) - initialAdminLoans.reduce((t, l) => t + l.remaining, 0);
+    const totalBorrowers = registeredBorrowers.length;
+    const activeLoans = adminLoans.filter((l) => l.status === 'ACTIVE').length;
+    const pendingApps = adminApps.filter((a) => a.status === 'PENDING' || a.status === 'UNDER REVIEW').length;
+    const overdueLoans = adminLoans.filter((l) => l.remaining > 0 && l.status === 'ACTIVE').length;
+    const totalReleased = adminLoans.reduce((t, l) => t + l.amount, 0);
+    const totalOutstanding = adminLoans.reduce((t, l) => t + l.remaining, 0);
 
     return (
       <>
@@ -1576,10 +1657,10 @@ export default function LendMateApp() {
 
           <View style={sh.statsGrid}>
             {[
-              ['Borrowers', '152', 'green'],
-              ['Active Loans', String(84 + activeLoanDelta), 'navy'],
-              ['Pending', String(17 + pendingDelta), 'green'],
-              ['Overdue', '9', 'amber'],
+              ['Borrowers', String(totalBorrowers), 'green'],
+              ['Active Loans', String(activeLoans), 'navy'],
+              ['Pending', String(pendingApps), 'green'],
+              ['Overdue', String(overdueLoans), 'amber'],
             ].map(([label, val, accent]) => (
               <View key={label} style={[sh.statCard, { backgroundColor: p.surface, borderColor: p.line }]}>
                 <View style={[sh.statBar, accent === 'navy' && sh.statBarNavy, accent === 'amber' && sh.statBarAmber]} />
@@ -1592,12 +1673,12 @@ export default function LendMateApp() {
           <View style={sh.portfolioCard}>
             <View style={sh.portfolioHalf}>
               <Text style={[sh.eyebrowSmall, { color: p.muted }]}>TOTAL RELEASED</Text>
-              <Text style={sh.portfolioAmt}>{money(850000 + amountDelta)}</Text>
+              <Text style={sh.portfolioAmt}>{money(totalReleased)}</Text>
             </View>
             <View style={sh.portfolioDivider} />
             <View style={sh.portfolioHalf}>
               <Text style={[sh.eyebrowSmall, { color: p.muted }]}>OUTSTANDING</Text>
-              <Text style={sh.portfolioOutstanding}>{money(420500 + remainDelta)}</Text>
+              <Text style={sh.portfolioOutstanding}>{money(totalOutstanding)}</Text>
             </View>
           </View>
 
@@ -1679,54 +1760,63 @@ export default function LendMateApp() {
           <View style={sh.sectionRow}>
             <Text style={[sh.sectionLabel, { color: p.navy }]}>Upcoming Payments</Text>
           </View>
-          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-            {installments.map((inst, i) => (
-              <View key={inst.number} style={[sh.installRow, i === installments.length - 1 && sh.installRowLast, { borderBottomColor: p.line }]}>
-                <View style={[sh.installNum, { backgroundColor: p.greenPale }]}>
-                  <Text style={[sh.installNumText, { color: p.greenDark }]}>{String(inst.number).padStart(2, '0')}</Text>
-                </View>
-                <View style={sh.installCopy}>
-                  <Text style={[sh.installTitle, { color: p.text }]}>Installment {inst.number}</Text>
-                  <Text style={[sh.installDate, { color: p.muted }]}>{inst.due}, 2026 · Juan Dela Cruz</Text>
-                </View>
-                <View style={sh.installRight}>
-                  <Text style={[sh.installAmount, { color: p.navy }]}>{money(inst.amount)}</Text>
-                  <Text style={[sh.installStatus, inst.status === 'PAID' ? sh.paidText : sh.pendingText]}>
-                    {inst.status}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
+          {adminLoans.filter((l) => l.status === 'ACTIVE' && l.remaining > 0).length === 0 ? (
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.muted }]}>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>No upcoming payments.</Text>
+            </View>
+          ) : (
+            <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+              {adminLoans.filter((l) => l.status === 'ACTIVE' && l.remaining > 0).map((loan, i, arr) => {
+                const installAmt = Math.ceil((loan.amount + loan.interest) / loan.term);
+                return (
+                  <View key={loan.id} style={[sh.installRow, i === arr.length - 1 && sh.installRowLast, { borderBottomColor: p.line }]}>
+                    <View style={[sh.installNum, { backgroundColor: p.greenPale }]}>
+                      <Text style={[sh.installNumText, { color: p.greenDark }]}>{String(i + 1).padStart(2, '0')}</Text>
+                    </View>
+                    <View style={sh.installCopy}>
+                      <Text style={[sh.installTitle, { color: p.text }]}>{loan.borrower}</Text>
+                      <Text style={[sh.installDate, { color: p.muted }]}>Loan #{loan.id} · {loan.term} months</Text>
+                    </View>
+                    <View style={sh.installRight}>
+                      <Text style={[sh.installAmount, { color: p.navy }]}>{money(installAmt)}</Text>
+                      <Text style={[sh.installStatus, sh.pendingText]}>PENDING</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
 
           {/* ── Recent Payment Records ─────────────────────────────────── */}
           <View style={sh.sectionRow}>
             <Text style={[sh.sectionLabel, { color: p.navy }]}>Recent Payments</Text>
           </View>
-          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-            {[
-              { borrower: 'Juan Dela Cruz', loanId: '10025', amount: 3667, date: 'October 1, 2026', status: 'PAID' },
-              { borrower: 'Maria Santos', loanId: '10024', amount: 5000, date: 'October 8, 2026', status: 'PAID' },
-              { borrower: 'Christian Santiago', loanId: '10025', amount: 1100, date: 'October 11, 2026', status: 'PENDING VERIFICATION' },
-            ].map((rec, i, arr) => (
-              <View key={rec.date + rec.borrower} style={[sh.historyRow, i === arr.length - 1 && sh.historyRowLast, { borderBottomColor: p.line }]}>
-                <View style={[sh.historyDot, rec.status === 'PAID' ? sh.historyDotPaid : sh.historyDotPending, { backgroundColor: rec.status === 'PAID' ? p.greenPale : p.amberPale }]}>
-                  <AppIcon name={rec.status === 'PAID' ? 'check' : 'clock'} size={14}
-                    color={rec.status === 'PAID' ? p.greenDark : p.amber} />
+          {adminLoans.length === 0 ? (
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.muted }]}>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>No payment records yet.</Text>
+            </View>
+          ) : (
+            <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+              {adminLoans.map((loan, i, arr) => (
+                <View key={loan.id} style={[sh.historyRow, i === arr.length - 1 && sh.historyRowLast, { borderBottomColor: p.line }]}>
+                  <View style={[sh.historyDot, loan.status === 'PAID' ? sh.historyDotPaid : sh.historyDotPending, { backgroundColor: loan.status === 'PAID' ? p.greenPale : p.amberPale }]}>
+                    <AppIcon name={loan.status === 'PAID' ? 'check' : 'clock'} size={14}
+                      color={loan.status === 'PAID' ? p.greenDark : p.amber} />
+                  </View>
+                  <View style={sh.historyCopy}>
+                    <Text style={[sh.historyDate, { color: p.text }]}>{loan.borrower}</Text>
+                    <Text style={[sh.historyMethod, { color: p.muted }]}>Loan #{loan.id} · {money(loan.amount)}</Text>
+                  </View>
+                  <View style={sh.historyRight}>
+                    <Text style={[sh.historyAmount, { color: p.navy }]}>{money(loan.remaining)}</Text>
+                    <Text style={[sh.historyStatus, loan.status === 'PAID' ? sh.paidText : sh.pendingText]}>
+                      {loan.status === 'PAID' ? 'PAID' : 'ACTIVE'}
+                    </Text>
+                  </View>
                 </View>
-                <View style={sh.historyCopy}>
-                  <Text style={[sh.historyDate, { color: p.text }]}>{rec.borrower}</Text>
-                  <Text style={[sh.historyMethod, { color: p.muted }]}>Loan #{rec.loanId} · {rec.date}</Text>
-                </View>
-                <View style={sh.historyRight}>
-                  <Text style={[sh.historyAmount, { color: p.navy }]}>{money(rec.amount)}</Text>
-                  <Text style={[sh.historyStatus, rec.status === 'PAID' ? sh.paidText : sh.pendingText]}>
-                    {rec.status}
-                  </Text>
-                </View>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          )}
 
         </ScrollView>
         <NavBar role="admin" screen={screen} onSelect={goTo} />
@@ -1736,51 +1826,101 @@ export default function LendMateApp() {
 
   // ── Admin Applications ────────────────────────────────────────────────────────
   const renderAdminApplications = () => {
-    const pendingCount = 17 + adminApps.filter((a) => a.status === 'PENDING').length - adminApplications.filter((a) => a.status === 'PENDING').length;
+    const pendingCount = adminApps.filter((a) => a.status === 'PENDING' || a.status === 'UNDER REVIEW').length;
     const toggleApp = (item: ApplicationRecord) =>
       setSelectedApp((prev) => (prev?.id === item.id ? null : item));
+    const toggleSelectApp = (id: string) =>
+      setSelectedAppIds((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    const deleteSelected = () => {
+      setAdminApps((prev) => prev.filter((a) => !selectedAppIds.has(a.id)));
+      setSelectedAppIds(new Set());
+      setAppSelectMode(false);
+    };
+    const deleteAll = () => { setAdminApps([]); setSelectedAppIds(new Set()); setAppSelectMode(false); };
 
     return (
       <>
         <Header />
         <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
           <PageTitle title="Applications" subtitle="Review and process requests." />
+
+          {/* Filter bar + select/delete controls */}
           <View style={[sh.filterBar, { borderBottomColor: p.line }]}>
-            <Text style={[sh.filterLabel, { color: p.navy }]}>ALL APPLICATIONS</Text>
-            <Text style={[sh.filterCount, { color: p.greenDark }]}>{pendingCount} pending</Text>
+            <Text style={[sh.filterLabel, { color: p.navy }]}>
+              {appSelectMode ? `${selectedAppIds.size} selected` : 'ALL APPLICATIONS'}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              <Text style={[sh.filterCount, { color: p.greenDark }]}>{pendingCount} pending</Text>
+              {adminApps.length > 0 && (
+                <Pressable onPress={() => { setAppSelectMode((v) => !v); setSelectedAppIds(new Set()); }}>
+                  <Text style={[sh.filterCount, { color: appSelectMode ? p.muted : p.navy }]}>
+                    {appSelectMode ? 'Cancel' : 'Select'}
+                  </Text>
+                </Pressable>
+              )}
+              {adminApps.length > 0 && !appSelectMode && (
+                <Pressable onPress={deleteAll}>
+                  <Text style={[sh.filterCount, { color: p.red }]}>Delete All</Text>
+                </Pressable>
+              )}
+              {appSelectMode && selectedAppIds.size > 0 && (
+                <Pressable onPress={deleteSelected}
+                  style={{ backgroundColor: p.red, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 7 }}>
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Delete ({selectedAppIds.size})</Text>
+                </Pressable>
+              )}
+            </View>
           </View>
+
+          {adminApps.length === 0 && (
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.muted, marginTop: 12 }]}>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>No applications yet.</Text>
+            </View>
+          )}
+
           {adminApps.map((item) => {
             const isOpen = selectedApp?.id === item.id;
+            const isSelected = selectedAppIds.has(item.id);
             return (
-              <View key={item.id} style={[sh.appCard, { backgroundColor: p.surface, borderColor: isOpen ? p.greenMid : p.line }]}>
-                <Pressable style={sh.appCardHeader} onPress={() => toggleApp(item)}>
+              <Pressable
+                key={item.id}
+                onPress={() => appSelectMode ? toggleSelectApp(item.id) : toggleApp(item)}
+                style={[sh.appCard, { backgroundColor: isSelected ? p.greenPale : p.surface, borderColor: isOpen ? p.greenMid : isSelected ? p.green : p.line }]}
+              >
+                <View style={sh.appCardHeader}>
+                  {appSelectMode && (
+                    <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: isSelected ? p.green : p.line, backgroundColor: isSelected ? p.green : p.surface, alignItems: 'center', justifyContent: 'center', marginRight: 6 }}>
+                      {isSelected && <AppIcon name="check" size={12} color="#fff" />}
+                    </View>
+                  )}
                   <Avatar name={item.borrower} />
                   <View style={sh.appCardCopy}>
                     <Text style={[sh.appCardName, { color: p.text }]}>#{item.id} · {item.borrower}</Text>
                     <Text style={[sh.appCardMeta, { color: p.muted }]}>{money(item.amount)} · {item.product}</Text>
                   </View>
                   <StatusBadge status={item.status} />
-                  {/* Chevron shows open/closed state */}
-                  <View style={{ marginLeft: 6, transform: [{ rotate: isOpen ? '90deg' : '0deg' }] }}>
+                  <View style={{ marginLeft: 6, transform: [{ rotate: isOpen && !appSelectMode ? '90deg' : '0deg' }] }}>
                     <AppIcon name="arrow" size={15} color={p.muted} />
                   </View>
-                </Pressable>
-
-                <View style={sh.appCardActions}>
-                  <Pressable onPress={() => toggleApp(item)} style={({ pressed }) => [sh.actionBtnBase, sh.actionBtnView, { borderColor: p.line }, pressed && sh.actionBtnViewPressed]}>
-                    <Text style={[sh.actionBtnViewText, { color: p.navy }]}>{isOpen ? 'Close' : 'View'}</Text>
-                  </Pressable>
-                  {(item.status === 'PENDING' || item.status === 'UNDER REVIEW') && (<>
-                    <Pressable onPress={() => decide(item, 'APPROVED')} style={({ pressed }) => [sh.actionBtnBase, sh.actionBtnApprove, pressed && sh.actionBtnApprovePressed]}>
-                      <Text style={sh.actionBtnApproveText}>Approve</Text>
-                    </Pressable>
-                    <Pressable onPress={() => decide(item, 'REJECTED')} style={({ pressed }) => [sh.actionBtnBase, sh.actionBtnReject, pressed && sh.actionBtnRejectPressed]}>
-                      <Text style={sh.actionBtnRejectText}>Reject</Text>
-                    </Pressable>
-                  </>)}
                 </View>
 
-                {isOpen && (
+                {!appSelectMode && (
+                  <View style={sh.appCardActions}>
+                    <Pressable onPress={() => toggleApp(item)} style={({ pressed }) => [sh.actionBtnBase, sh.actionBtnView, { borderColor: p.line }, pressed && sh.actionBtnViewPressed]}>
+                      <Text style={[sh.actionBtnViewText, { color: p.navy }]}>{isOpen ? 'Close' : 'View'}</Text>
+                    </Pressable>
+                    {(item.status === 'PENDING' || item.status === 'UNDER REVIEW') && (<>
+                      <Pressable onPress={() => decide(item, 'APPROVED')} style={({ pressed }) => [sh.actionBtnBase, sh.actionBtnApprove, pressed && sh.actionBtnApprovePressed]}>
+                        <Text style={sh.actionBtnApproveText}>Approve</Text>
+                      </Pressable>
+                      <Pressable onPress={() => decide(item, 'REJECTED')} style={({ pressed }) => [sh.actionBtnBase, sh.actionBtnReject, pressed && sh.actionBtnRejectPressed]}>
+                        <Text style={sh.actionBtnRejectText}>Reject</Text>
+                      </Pressable>
+                    </>)}
+                  </View>
+                )}
+
+                {isOpen && !appSelectMode && (
                   <View style={[sh.appCardExpanded, { borderTopColor: p.line }]}>
                     <DetailRow label="Applicant" value={item.borrower} />
                     <DetailRow label="Requested" value={money(item.amount)} />
@@ -1790,7 +1930,7 @@ export default function LendMateApp() {
                     {item.status === 'REJECTED' && <Text style={sh.rejectTextSmall}>Rejected.</Text>}
                   </View>
                 )}
-              </View>
+              </Pressable>
             );
           })}
         </ScrollView>
@@ -1800,226 +1940,525 @@ export default function LendMateApp() {
   };
 
   // ── Admin Borrowers ───────────────────────────────────────────────────────────
-  const renderAdminBorrowers = () => (
-    <>
-      <Header />
-      <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-        <PageTitle title="Borrowers" subtitle="Manage borrower records." />
-        {borrowers.map((b) => (
-          <Pressable
-            key={b.id}
-            style={({ pressed }) => [sh.borrowerRow, { backgroundColor: p.surface, borderColor: p.line }, pressed && sh.cardPressed]}
-            onPress={() => { setSelectedBorrower(b); goTo('admin-borrower-detail'); }}
-          >
-            <Avatar name={b.name} />
-            <View style={sh.borrowerCopy}>
-              <Text style={[sh.borrowerName, { color: p.text }]}>{b.name}</Text>
-              <Text style={[sh.borrowerMeta, { color: p.muted }]}>{b.phone} · {b.activeLoans} active loan{b.activeLoans !== 1 ? 's' : ''}</Text>
+  const renderAdminBorrowers = () => {
+    const toggleSelectBorrower = (id: string) =>
+      setSelectedBorrowerIds((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    const deleteSelected = () => {
+      setRegisteredBorrowers((prev) => prev.filter((b) => !selectedBorrowerIds.has(b.id)));
+      setSelectedBorrowerIds(new Set());
+      setBorrowerSelectMode(false);
+    };
+    const deleteAll = () => { setRegisteredBorrowers([]); setSelectedBorrowerIds(new Set()); setBorrowerSelectMode(false); };
+
+    return (
+      <>
+        <Header />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+          <View style={[sh.filterBar, { borderBottomColor: p.line }]}>
+            <Text style={[sh.filterLabel, { color: p.navy }]}>
+              {borrowerSelectMode ? `${selectedBorrowerIds.size} selected` : `BORROWERS (${registeredBorrowers.length})`}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              {registeredBorrowers.length > 0 && (
+                <Pressable onPress={() => { setBorrowerSelectMode((v) => !v); setSelectedBorrowerIds(new Set()); }}>
+                  <Text style={[sh.filterCount, { color: borrowerSelectMode ? p.muted : p.navy }]}>
+                    {borrowerSelectMode ? 'Cancel' : 'Select'}
+                  </Text>
+                </Pressable>
+              )}
+              {registeredBorrowers.length > 0 && !borrowerSelectMode && (
+                <Pressable onPress={deleteAll}>
+                  <Text style={[sh.filterCount, { color: p.red }]}>Delete All</Text>
+                </Pressable>
+              )}
+              {borrowerSelectMode && selectedBorrowerIds.size > 0 && (
+                <Pressable onPress={deleteSelected}
+                  style={{ backgroundColor: p.red, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 7 }}>
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Delete ({selectedBorrowerIds.size})</Text>
+                </Pressable>
+              )}
             </View>
-            <StatusBadge status={b.status} />
-            <AppIcon name="arrow" size={16} color={p.muted} />
-          </Pressable>
-        ))}
-      </ScrollView>
-      <NavBar role="admin" screen={screen} onSelect={goTo} />
-    </>
-  );
+          </View>
+
+          {registeredBorrowers.length === 0 ? (
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.muted, marginTop: 12 }]}>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>No borrowers have registered yet.</Text>
+            </View>
+          ) : registeredBorrowers.map((b) => {
+            const isSelected = selectedBorrowerIds.has(b.id);
+            return (
+              <Pressable
+                key={b.id}
+                style={({ pressed }) => [sh.borrowerRow, { backgroundColor: isSelected ? p.greenPale : p.surface, borderColor: isSelected ? p.green : p.line }, pressed && sh.cardPressed]}
+                onPress={() => {
+                  if (borrowerSelectMode) { toggleSelectBorrower(b.id); }
+                  else { setSelectedBorrower(b); goTo('admin-borrower-detail'); }
+                }}
+              >
+                {borrowerSelectMode && (
+                  <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: isSelected ? p.green : p.line, backgroundColor: isSelected ? p.green : p.surface, alignItems: 'center', justifyContent: 'center' }}>
+                    {isSelected && <AppIcon name="check" size={12} color="#fff" />}
+                  </View>
+                )}
+                <Avatar name={b.name} />
+                <View style={sh.borrowerCopy}>
+                  <Text style={[sh.borrowerName, { color: p.text }]}>{b.name}</Text>
+                  <Text style={[sh.borrowerMeta, { color: p.muted }]}>
+                    {b.phone !== '—' ? b.phone + ' · ' : ''}
+                    {adminApps.filter((a) => a.borrower === b.name).length} application{adminApps.filter((a) => a.borrower === b.name).length !== 1 ? 's' : ''}
+                  </Text>
+                </View>
+                <StatusBadge status={b.status} />
+                {!borrowerSelectMode && <AppIcon name="arrow" size={16} color={p.muted} />}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        <NavBar role="admin" screen={screen} onSelect={goTo} />
+      </>
+    );
+  };
 
   // ── Admin Borrower Detail ─────────────────────────────────────────────────────
-  const renderAdminBorrowerDetail = () => (
-    <>
-      <Header bell={false} />
-      <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-        <PageTitle title="Borrower Profile" subtitle={selectedBorrower.id} onBack={() => goTo('admin-borrowers')} />
+  const renderAdminBorrowerDetail = () => {
+    if (!selectedBorrower) {
+      return (
+        <>
+          <Header bell={false} />
+          <View style={[sh.flex, { alignItems: 'center', justifyContent: 'center', backgroundColor: p.background }]}>
+            <Text style={{ color: p.muted, fontSize: 14 }}>No borrower selected.</Text>
+          </View>
+          <NavBar role="admin" screen={screen} onSelect={goTo} />
+        </>
+      );
+    }
+    const borrowerApps = adminApps.filter((a) => a.borrower === selectedBorrower.name);
+    const borrowerLoans = adminLoans.filter((l) => l.borrower === selectedBorrower.name);
 
-        {/* Profile header */}
-        <View style={[sh.profilePanel, { backgroundColor: p.surface, borderRadius: 16, paddingVertical: 24, marginBottom: 14, borderWidth: 1, borderColor: p.line }]}>
-          <Avatar name={selectedBorrower.name} large />
-          <Text style={[sh.profileName, { color: p.navy }]}>{selectedBorrower.name}</Text>
-          <Text style={[sh.profileMeta, { color: p.muted }]}>{selectedBorrower.status} · {selectedBorrower.activeLoans} active loan{selectedBorrower.activeLoans !== 1 ? 's' : ''}</Text>
-        </View>
+    const removeBorrower = () => {
+      setRegisteredBorrowers((prev) => prev.filter((b) => b.id !== selectedBorrower.id));
+      goTo('admin-borrowers');
+    };
 
-        {/* Contact & account info */}
-        <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8 }]}>Account Information</Text>
-        <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-          <DetailRow label="Full Name" value={selectedBorrower.name} />
-          <DetailRow label="Phone" value={selectedBorrower.phone} />
-          <DetailRow label="Borrower ID" value={selectedBorrower.id} />
-          <DetailRow label="Active Loans" value={String(selectedBorrower.activeLoans)} />
-          <DetailRow label="Status" value={selectedBorrower.status} last />
-        </View>
+    return (
+      <>
+        <Header bell={false} />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+          <PageTitle title="Borrower Profile" subtitle={`ID: ${selectedBorrower.id}`} onBack={() => goTo('admin-borrowers')} />
 
-        {/* Government ID section */}
-        <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8, marginTop: 4 }]}>Government ID on File</Text>
-        {idType ? (
-          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-            <DetailRow label="ID Type" value={idType} />
-            {idNumber ? <DetailRow label="ID Number" value={idNumber} last={!idPhotoUri} /> : null}
-            {idPhotoUri ? (
-              <View style={{ paddingVertical: 12 }}>
-                <Text style={[sh.fieldHint, { color: p.muted, marginBottom: 8 }]}>ID Photo</Text>
-                <Image source={{ uri: idPhotoUri }} style={sh.profileIdPhoto} resizeMode="cover" />
+          {/* Profile header */}
+          <View style={[sh.profilePanel, { backgroundColor: p.surface, borderRadius: 16, paddingVertical: 24, marginBottom: 14, borderWidth: 1, borderColor: p.line }]}>
+            {profilePhotoUri ? (
+              <View style={{ width: 72, height: 72, borderRadius: 36, overflow: 'hidden', borderWidth: 2, borderColor: p.green }}>
+                <Image source={{ uri: profilePhotoUri }} style={{ width: 72, height: 72 }} resizeMode="cover" />
               </View>
-            ) : null}
+            ) : (
+              <Avatar name={selectedBorrower.name} large />
+            )}
+            <Text style={[sh.profileName, { color: p.navy, marginTop: 8 }]}>{selectedBorrower.name}</Text>
+            <StatusBadge status={selectedBorrower.status} />
           </View>
-        ) : (
-          <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.amber }]}>
-            <Text style={[sh.infoBoxBody, { color: p.muted }]}>No government ID has been uploaded yet for this borrower.</Text>
-          </View>
-        )}
 
-        <Btn title="View Loan Records" onPress={() => goTo('admin-loans')} />
-      </ScrollView>
-      <NavBar role="admin" screen={screen} onSelect={goTo} />
-    </>
-  );
+          {/* Account info */}
+          <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8 }]}>Account Information</Text>
+          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+            <DetailRow label="Full Name" value={selectedBorrower.name} />
+            <DetailRow label="Phone" value={selectedBorrower.phone} />
+            <DetailRow label="Borrower ID" value={selectedBorrower.id} />
+            <DetailRow label="Status" value={selectedBorrower.status} last />
+          </View>
+
+          {/* Applications */}
+          {borrowerApps.length > 0 && (
+            <>
+              <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8, marginTop: 4 }]}>
+                Applications ({borrowerApps.length})
+              </Text>
+              <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+                {borrowerApps.map((a, i) => (
+                  <View key={a.id} style={[sh.detailRow, i === borrowerApps.length - 1 && sh.detailRowLast, { borderBottomColor: p.line }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[sh.detailLabel, { color: p.text, fontWeight: '700' }]}>#{a.id} · {a.product}</Text>
+                      <Text style={[sh.detailLabel, { color: p.muted, marginTop: 2 }]}>{money(a.amount)}</Text>
+                    </View>
+                    <StatusBadge status={a.status} />
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* Active loans */}
+          {borrowerLoans.length > 0 && (
+            <>
+              <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8, marginTop: 4 }]}>
+                Loans ({borrowerLoans.length})
+              </Text>
+              <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+                {borrowerLoans.map((l, i) => (
+                  <View key={l.id} style={[sh.detailRow, i === borrowerLoans.length - 1 && sh.detailRowLast, { borderBottomColor: p.line }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[sh.detailLabel, { color: p.text, fontWeight: '700' }]}>Loan #{l.id}</Text>
+                      <Text style={[sh.detailLabel, { color: p.muted, marginTop: 2 }]}>{money(l.amount)} · {l.term} mo</Text>
+                    </View>
+                    <StatusBadge status={l.status} />
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          {/* Government ID */}
+          <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8, marginTop: 4 }]}>Government ID on File</Text>
+          {idType && selectedBorrower.name === fullName ? (
+            <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+              <DetailRow label="ID Type" value={idType} />
+              {idNumber ? <DetailRow label="ID Number" value={idNumber} last={!idPhotoUri} /> : null}
+              {idPhotoUri ? (
+                <View style={{ paddingVertical: 12 }}>
+                  <Text style={[sh.fieldHint, { color: p.muted, marginBottom: 8 }]}>ID Photo</Text>
+                  <Image source={{ uri: idPhotoUri }} style={sh.profileIdPhoto} resizeMode="cover" />
+                </View>
+              ) : (
+                <View style={{ paddingVertical: 10 }}>
+                  <Text style={[sh.fieldHint, { color: p.amber }]}>No ID photo uploaded.</Text>
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.muted }]}>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>No government ID on file for this borrower.</Text>
+            </View>
+          )}
+
+          {/* Remove borrower */}
+          <View style={{ marginTop: 16 }}>
+            <Btn title="Remove Borrower" variant="danger" onPress={removeBorrower} />
+          </View>
+        </ScrollView>
+        <NavBar role="admin" screen={screen} onSelect={goTo} />
+      </>
+    );
+  };
 
   // ── Admin Loans ───────────────────────────────────────────────────────────────
-  const renderAdminLoans = () => (
-    <>
-      <Header />
-      <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-        <PageTitle title="Loan Management" subtitle="Monitor active and completed loans." />
-        {adminLoans.map((loan) => (
-          <Pressable
-            key={loan.id}
-            style={({ pressed }) => [sh.loanCard, { backgroundColor: p.surface, borderColor: p.line }, pressed && sh.cardPressed]}
-            onPress={() => { setSelectedLoan(loan); goTo('loan-details'); }}
-          >
-            <View style={sh.loanCardHead}>
-              <Text style={[sh.loanCardTitle, { color: p.navy }]}>Loan #{loan.id}</Text>
-              <StatusBadge status={loan.status} />
+  const renderAdminLoans = () => {
+    const [loanSelectMode, setLoanSelectMode] = React.useState(false);
+    const [selectedLoanIds, setSelectedLoanIds] = React.useState<Set<string>>(new Set());
+    const toggleSelectLoan = (id: string) =>
+      setSelectedLoanIds((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    const deleteSelected = () => {
+      setAdminLoans((prev) => prev.filter((l) => !selectedLoanIds.has(l.id)));
+      setSelectedLoanIds(new Set());
+      setLoanSelectMode(false);
+    };
+    const deleteAll = () => { setAdminLoans([]); setSelectedLoanIds(new Set()); setLoanSelectMode(false); };
+
+    return (
+      <>
+        <Header />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+          <View style={[sh.filterBar, { borderBottomColor: p.line, marginBottom: 8 }]}>
+            <Text style={[sh.filterLabel, { color: p.navy }]}>
+              {loanSelectMode ? `${selectedLoanIds.size} selected` : `LOANS (${adminLoans.length})`}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              {adminLoans.length > 0 && (
+                <Pressable onPress={() => { setLoanSelectMode((v) => !v); setSelectedLoanIds(new Set()); }}>
+                  <Text style={{ color: loanSelectMode ? p.muted : p.navy, fontSize: 12, fontWeight: '700' }}>
+                    {loanSelectMode ? 'Cancel' : 'Select'}
+                  </Text>
+                </Pressable>
+              )}
+              {adminLoans.length > 0 && !loanSelectMode && (
+                <Pressable onPress={deleteAll}>
+                  <Text style={{ color: p.red, fontSize: 12, fontWeight: '700' }}>Delete All</Text>
+                </Pressable>
+              )}
+              {loanSelectMode && selectedLoanIds.size > 0 && (
+                <Pressable onPress={deleteSelected}
+                  style={{ backgroundColor: p.red, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 7 }}>
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Delete ({selectedLoanIds.size})</Text>
+                </Pressable>
+              )}
             </View>
-            <Text style={[sh.loanCardBorrower, { color: p.muted }]}>{loan.borrower}</Text>
-            <View style={[sh.loanCardDetails, { borderColor: p.line }]}>
-              <DetailRow label="Amount" value={money(loan.amount)} />
-              <DetailRow label="Interest" value={`10% · ${money(loan.interest)}`} />
-              <DetailRow label="Term" value={`${loan.term} months`} />
-              <DetailRow label="Remaining" value={money(loan.remaining)} last />
+          </View>
+
+          {adminLoans.length === 0 && (
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.muted }]}>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>No loans yet.</Text>
             </View>
-            <View style={sh.loanCardFooter}>
-              <Text style={[sh.loanCardLink, { color: p.greenDark }]}>View full details</Text>
-              <AppIcon name="arrow" size={14} color={p.green} />
-            </View>
-          </Pressable>
-        ))}
-      </ScrollView>
-      <NavBar role="admin" screen={screen} onSelect={goTo} />
-    </>
-  );
+          )}
+
+          {adminLoans.map((loan) => {
+            const isSelected = selectedLoanIds.has(loan.id);
+            return (
+              <Pressable
+                key={loan.id}
+                style={({ pressed }) => [sh.loanCard, { backgroundColor: isSelected ? p.greenPale : p.surface, borderColor: isSelected ? p.green : p.line }, pressed && sh.cardPressed]}
+                onPress={() => {
+                  if (loanSelectMode) { toggleSelectLoan(loan.id); }
+                  else { setSelectedLoan(loan); goTo('loan-details'); }
+                }}
+              >
+                <View style={sh.loanCardHead}>
+                  {loanSelectMode && (
+                    <View style={{ width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: isSelected ? p.green : p.line, backgroundColor: isSelected ? p.green : p.surface, alignItems: 'center', justifyContent: 'center', marginRight: 6 }}>
+                      {isSelected && <AppIcon name="check" size={12} color="#fff" />}
+                    </View>
+                  )}
+                  <Text style={[sh.loanCardTitle, { color: p.navy, flex: 1 }]}>Loan #{loan.id}</Text>
+                  <StatusBadge status={loan.status} />
+                </View>
+                <Text style={[sh.loanCardBorrower, { color: p.muted }]}>{loan.borrower}</Text>
+                {!loanSelectMode && (
+                  <>
+                    <View style={[sh.loanCardDetails, { borderColor: p.line }]}>
+                      <DetailRow label="Amount" value={money(loan.amount)} />
+                      <DetailRow label="Interest" value={`10% · ${money(loan.interest)}`} />
+                      <DetailRow label="Term" value={`${loan.term} months`} />
+                      <DetailRow label="Remaining" value={money(loan.remaining)} last />
+                    </View>
+                    <View style={sh.loanCardFooter}>
+                      <Text style={[sh.loanCardLink, { color: p.greenDark }]}>View full details</Text>
+                      <AppIcon name="arrow" size={14} color={p.green} />
+                    </View>
+                  </>
+                )}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        <NavBar role="admin" screen={screen} onSelect={goTo} />
+      </>
+    );
+  };
 
   // ── Admin Loan Detail ──────────────────────────────────────────────────────────
-  const renderAdminLoanDetail = () => (
-    <>
-      <Header />
-      <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-        <PageTitle title="Loan Details" subtitle={`#${selectedLoan.id} · ${selectedLoan.borrower}`} onBack={() => goTo('admin-loans')} />
-        <View style={sh.loanHero}>
-          <View style={sh.loanHeroTop}>
-            <Text style={sh.heroEyebrow}>LOAN AMOUNT</Text>
-            <StatusBadge status={selectedLoan.status} />
+  const renderAdminLoanDetail = () => {
+    if (!selectedLoan) {
+      return (
+        <>
+          <Header />
+          <View style={[sh.flex, { alignItems: 'center', justifyContent: 'center', backgroundColor: p.background }]}>
+            <Text style={{ color: p.muted, fontSize: 14 }}>No loan selected.</Text>
           </View>
-          <Text style={sh.loanHeroAmount}>{money(selectedLoan.amount)}</Text>
-          <Text style={sh.loanHeroSub}>Remaining {money(selectedLoan.remaining)}</Text>
-        </View>
-        <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-          <DetailRow label="Borrower" value={selectedLoan.borrower} />
-          <DetailRow label="Principal" value={money(selectedLoan.amount)} />
-          <DetailRow label="Interest" value={money(selectedLoan.interest)} />
-          <DetailRow label="Total Payable" value={money(selectedLoan.amount + selectedLoan.interest)} />
-          <DetailRow label="Remaining" value={money(selectedLoan.remaining)} />
-          <DetailRow label="Term" value={`${selectedLoan.term} months`} />
-          <DetailRow label="Status" value={selectedLoan.status} last />
-        </View>
-        <Btn title="View Schedule" onPress={() => goTo('schedule')} />
-        <Btn title="Payment History" onPress={() => goTo('payments')} variant="secondary" />
-      </ScrollView>
-      <NavBar role="admin" screen={screen} onSelect={goTo} />
-    </>
-  );
+          <NavBar role="admin" screen={screen} onSelect={goTo} />
+        </>
+      );
+    }
+    return (
+      <>
+        <Header />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
+          <PageTitle title="Loan Details" subtitle={`#${selectedLoan.id} · ${selectedLoan.borrower}`} onBack={() => goTo('admin-loans')} />
+          <View style={sh.loanHero}>
+            <View style={sh.loanHeroTop}>
+              <Text style={sh.heroEyebrow}>LOAN AMOUNT</Text>
+              <StatusBadge status={selectedLoan.status} />
+            </View>
+            <Text style={sh.loanHeroAmount}>{money(selectedLoan.amount)}</Text>
+            <Text style={sh.loanHeroSub}>Remaining {money(selectedLoan.remaining)}</Text>
+          </View>
+          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+            <DetailRow label="Borrower" value={selectedLoan.borrower} />
+            <DetailRow label="Principal" value={money(selectedLoan.amount)} />
+            <DetailRow label="Interest" value={money(selectedLoan.interest)} />
+            <DetailRow label="Total Payable" value={money(selectedLoan.amount + selectedLoan.interest)} />
+            <DetailRow label="Remaining" value={money(selectedLoan.remaining)} />
+            <DetailRow label="Term" value={`${selectedLoan.term} months`} />
+            <DetailRow label="Status" value={selectedLoan.status} last />
+          </View>
+          <Btn title="View Schedule" onPress={() => goTo('schedule')} />
+          <Btn title="Payment History" onPress={() => goTo('payments')} variant="secondary" />
+        </ScrollView>
+        <NavBar role="admin" screen={screen} onSelect={goTo} />
+      </>
+    );
+  };
 
   // ── Profile screen ────────────────────────────────────────────────────────────
-  const renderProfile = () => (
-    <View style={[sh.flex, { backgroundColor: p.background }]}>
-      <Header bell={false} />
-      <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
-        <PageTitle
-          title="My Profile"
-          subtitle="Your account details"
-          onBack={() => goTo(role === 'admin' ? 'admin-dashboard' : 'dashboard')}
-        />
+  const renderProfile = () => {
+    const pickProfilePhoto = async () => {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') { setFormError('Allow photo library access to set a profile picture.'); return; }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets[0]) setProfilePhotoUri(result.assets[0].uri);
+    };
 
-        {/* Avatar + name */}
-        <View style={[sh.profilePanel, { backgroundColor: p.surface, borderRadius: 16, paddingVertical: 24, marginBottom: 14, borderWidth: 1, borderColor: p.line }]}>
-          <View style={[sh.borrowerLargeInitials, { backgroundColor: p.navy, width: 72, height: 72, borderRadius: 36 }]}>
-            <Text style={[sh.borrowerLargeInitialsText, { color: p.surface, fontSize: 22, fontWeight: '800' }]}>
-              {role === 'admin' ? 'AD' : initials(fullName || 'U')}
-            </Text>
+    const takeProfilePhoto = async () => {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') { setFormError('Allow camera access to take a profile picture.'); return; }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets[0]) setProfilePhotoUri(result.assets[0].uri);
+    };
+
+    const pickIdPhoto = async () => {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') { setFormError('Allow photo library access to upload your ID.'); return; }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 10],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets[0]) setIdPhotoUri(result.assets[0].uri);
+    };
+
+    const takeIdPhoto = async () => {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') { setFormError('Allow camera access to take a photo of your ID.'); return; }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [16, 10],
+        quality: 0.85,
+      });
+      if (!result.canceled && result.assets[0]) setIdPhotoUri(result.assets[0].uri);
+    };
+
+    const missingIdPhoto = role === 'borrower' && idType && !idPhotoUri;
+
+    return (
+      <View style={[sh.flex, { backgroundColor: p.background }]}>
+        <Header bell={false} />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]} keyboardShouldPersistTaps="handled">
+          <PageTitle
+            title="My Profile"
+            subtitle="Your account details"
+            onBack={() => goTo(role === 'admin' ? 'admin-dashboard' : 'dashboard')}
+          />
+
+          {/* ── Profile photo + name ──────────────────────────────────── */}
+          <View style={[sh.profilePanel, { backgroundColor: p.surface, borderRadius: 16, paddingVertical: 24, marginBottom: 14, borderWidth: 1, borderColor: p.line }]}>
+            <Pressable onPress={pickProfilePhoto} style={{ alignItems: 'center' }}>
+              {profilePhotoUri ? (
+                <View style={{ width: 80, height: 80, borderRadius: 40, overflow: 'hidden', borderWidth: 2, borderColor: p.green }}>
+                  <Image source={{ uri: profilePhotoUri }} style={{ width: 80, height: 80 }} resizeMode="cover" />
+                </View>
+              ) : (
+                <View style={[sh.borrowerLargeInitials, { backgroundColor: p.navyCard, width: 80, height: 80, borderRadius: 40, borderWidth: 2, borderColor: p.line }]}>
+                  <Text style={{ color: '#FFFFFF', fontSize: 24, fontWeight: '800' }}>
+                    {role === 'admin' ? 'AD' : initials(fullName || 'U')}
+                  </Text>
+                </View>
+              )}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 }}>
+                <AppIcon name="camera" size={13} color={p.green} />
+                <Text style={{ color: p.green, fontSize: 12, fontWeight: '700' }}>
+                  {profilePhotoUri ? 'Change photo' : 'Add photo'}
+                </Text>
+              </View>
+            </Pressable>
+            {profilePhotoUri && (
+              <Pressable onPress={takeProfilePhoto} style={{ marginTop: 4 }}>
+                <Text style={{ color: p.muted, fontSize: 11, textAlign: 'center' }}>Take new photo</Text>
+              </Pressable>
+            )}
+            <Text style={[sh.profileName, { color: p.navy, marginTop: 10 }]}>{fullName || '—'}</Text>
+            <View style={[sh.badge, { backgroundColor: role === 'admin' ? p.amberPale : p.greenPale, marginTop: 6 }]}>
+              <Text style={[sh.badgeText, { color: role === 'admin' ? p.amber : p.greenDark }]}>
+                {role === 'admin' ? 'Administrator' : 'Borrower'}
+              </Text>
+            </View>
           </View>
-          <Text style={[sh.profileName, { color: p.navy, marginTop: 12 }]}>{fullName || '—'}</Text>
-          <View style={[sh.badge, { backgroundColor: role === 'admin' ? p.amberPale : p.greenPale, marginTop: 6 }]}>
-            <Text style={[sh.badgeText, { color: role === 'admin' ? p.amber : p.greenDark, textTransform: 'capitalize' }]}>
-              {role === 'admin' ? 'Administrator' : 'Borrower'}
-            </Text>
+
+          {/* ── Account info ──────────────────────────────────────────── */}
+          <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8 }]}>Account Information</Text>
+          <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
+            <DetailRow label="Full Name" value={fullName || '—'} />
+            <DetailRow label="Email" value={email || firebaseUser?.email || '—'} />
+            <DetailRow label="Phone" value={phone || '—'} />
+            <DetailRow label="Role" value={role === 'admin' ? 'Administrator' : 'Borrower'} last />
           </View>
-        </View>
 
-        {/* Account info */}
-        <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8 }]}>Account Information</Text>
-        <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-          <DetailRow label="Full Name" value={fullName || '—'} />
-          <DetailRow label="Email" value={email || firebaseUser?.email || '—'} />
-          <DetailRow label="Phone" value={phone || '—'} />
-          <DetailRow label="Role" value={role === 'admin' ? 'Administrator' : 'Borrower'} last />
-        </View>
+          {/* ── Government ID — borrowers only ───────────────────────── */}
+          {role === 'borrower' && (
+            <>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, marginTop: 4 }}>
+                <Text style={[sh.sectionLabel, { color: p.navy }]}>Government ID</Text>
+                {missingIdPhoto && (
+                  <View style={[sh.badge, { backgroundColor: p.amberPale }]}>
+                    <Text style={[sh.badgeText, { color: p.amber }]}>PHOTO MISSING</Text>
+                  </View>
+                )}
+              </View>
 
-        {/* ID info — borrowers only */}
-        {role === 'borrower' && (
-          <>
-            <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8, marginTop: 4 }]}>Government ID</Text>
-            <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
               {idType ? (
-                <>
+                <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: missingIdPhoto ? p.amber : p.line }]}>
                   <DetailRow label="ID Type" value={idType} />
-                  {idNumber ? <DetailRow label="ID Number" value={idNumber} last={!idPhotoUri} /> : null}
+                  {idNumber ? <DetailRow label="ID Number" value={idNumber} last={false} /> : null}
                   {idPhotoUri ? (
                     <View style={{ paddingVertical: 12 }}>
                       <Text style={[sh.fieldHint, { color: p.muted, marginBottom: 8 }]}>ID Photo</Text>
                       <Image source={{ uri: idPhotoUri }} style={sh.profileIdPhoto} resizeMode="cover" />
+                      <Pressable
+                        style={({ pressed }) => [sh.idPhotoRetake, { backgroundColor: p.greenPale }, pressed && { opacity: 0.7 }]}
+                        onPress={pickIdPhoto}
+                      >
+                        <Text style={[sh.idPhotoRetakeText, { color: p.greenDark }]}>Change photo</Text>
+                      </Pressable>
                     </View>
-                  ) : null}
-                </>
+                  ) : (
+                    <View style={{ paddingVertical: 12 }}>
+                      <Text style={[sh.fieldHint, { color: p.amber, marginBottom: 10, fontWeight: '600' }]}>
+                        No ID photo uploaded. Please add one to complete your verification.
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <Pressable
+                          style={({ pressed }) => [sh.idPhotoBtn, { flex: 1 }, pressed && sh.idPhotoBtnPressed]}
+                          onPress={takeIdPhoto}
+                        >
+                          <AppIcon name="camera" size={20} color={p.green} />
+                          <Text style={[sh.idPhotoBtnText, { color: p.muted }]}>Take Photo</Text>
+                        </Pressable>
+                        <Pressable
+                          style={({ pressed }) => [sh.idPhotoBtn, { flex: 1 }, pressed && sh.idPhotoBtnPressed]}
+                          onPress={pickIdPhoto}
+                        >
+                          <AppIcon name="upload" size={20} color={p.green} />
+                          <Text style={[sh.idPhotoBtnText, { color: p.muted }]}>Upload</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  )}
+                </View>
               ) : (
-                <DetailRow label="ID on file" value="Not uploaded" last />
+                <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.amber }]}>
+                  <Text style={[sh.infoBoxTitle, { color: p.navy }]}>No ID on file</Text>
+                  <Text style={[sh.infoBoxBody, { color: p.muted }]}>
+                    You did not provide a government ID during registration. Please re-register or contact support.
+                  </Text>
+                </View>
               )}
+            </>
+          )}
+
+          {formError ? (
+            <View style={[sh.errorBox, { backgroundColor: p.redPale, marginTop: 8 }]}>
+              <Text style={[sh.errorText, { color: p.red }]}>{formError}</Text>
             </View>
-          </>
-        )}
+          ) : null}
 
-        {/* Registration date */}
-        {firebaseUser?.createdAt && (
-          <>
-            <Text style={[sh.sectionLabel, { color: p.navy, marginBottom: 8, marginTop: 4 }]}>Account</Text>
-            <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-              <DetailRow label="Member since" value={todayLong} last />
-            </View>
-          </>
-        )}
+          {/* ── Logout ───────────────────────────────────────────────── */}
+          <View style={{ marginTop: 16 }}>
+            <Btn title="Log Out" variant="danger" onPress={() => setShowLogout(true)} />
+          </View>
+        </ScrollView>
 
-        {/* Logout */}
-        <View style={{ marginTop: 8 }}>
-          <Btn
-            title="Log Out"
-            variant="danger"
-            onPress={() => setShowLogout(true)}
-          />
-        </View>
-      </ScrollView>
-
-      {role === 'borrower' && <NavBar role="borrower" screen={screen} onSelect={goTo} />}
-      {role === 'admin' && <NavBar role="admin" screen={screen} onSelect={goTo} />}
-    </View>
-  );
+        {role === 'borrower' && <NavBar role="borrower" screen={screen} onSelect={goTo} />}
+        {role === 'admin' && <NavBar role="admin" screen={screen} onSelect={goTo} />}
+      </View>
+    );
+  };
 
   // ── Router ────────────────────────────────────────────────────────────────────
   // ── Auth loading gate ───────────────────────────────────────────────────────

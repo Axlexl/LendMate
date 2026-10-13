@@ -10,7 +10,8 @@ export type Screen =
 
 export type IconName =
   | 'bell' | 'home' | 'file' | 'users' | 'wallet'
-  | 'calendar' | 'arrow' | 'check' | 'clock' | 'back' | 'shield' | 'star';
+  | 'calendar' | 'arrow' | 'check' | 'clock' | 'back' | 'shield' | 'star'
+  | 'camera' | 'upload';
 
 export type Review = {
   id: string;
@@ -33,29 +34,11 @@ export type AdminLoanRecord = {
 
 // ─── Seed data ────────────────────────────────────────────────────────────────
 
-export const adminApplications: ApplicationRecord[] = [
-  { id: '1025', borrower: 'Juan Dela Cruz', amount: 10000, product: 'Personal Loan', status: 'PENDING' },
-  { id: '1024', borrower: 'Maria Santos', amount: 25000, product: 'Business Loan', status: 'UNDER REVIEW' },
-  { id: '1023', borrower: 'Ana Lopez', amount: 15000, product: 'Education Loan', status: 'PENDING' },
-];
-
-export const initialAdminLoans: AdminLoanRecord[] = [
-  { id: '10025', borrower: 'Juan Dela Cruz', amount: 10000, interest: 1000, term: 3, remaining: 7500, status: 'ACTIVE' },
-  { id: '10024', borrower: 'Maria Santos', amount: 20000, interest: 2000, term: 6, remaining: 12500, status: 'ACTIVE' },
-  { id: '10023', borrower: 'Ana Lopez', amount: 15000, interest: 1500, term: 6, remaining: 0, status: 'PAID' },
-];
-
-export const borrowers = [
-  { id: 'BR-1044', name: 'Juan Dela Cruz', phone: '09123456789', activeLoans: 2, status: 'ACTIVE' },
-  { id: 'BR-1042', name: 'Maria Santos', phone: '09987654321', activeLoans: 1, status: 'ACTIVE' },
-  { id: 'BR-1047', name: 'Ana Lopez', phone: '09223334455', activeLoans: 1, status: 'REVIEW' },
-];
-
-export const seedReviews: Review[] = [
-  { id: 'r1', borrower: 'Juan Dela Cruz', stars: 5, comment: 'Very smooth process! The loan was approved quickly and the payment schedule is easy to follow.', date: 'October 3, 2026' },
-  { id: 'r2', borrower: 'Maria Santos', stars: 4, comment: 'Good experience overall. The app is clean and easy to use. Would like faster approval times.', date: 'October 6, 2026' },
-  { id: 'r3', borrower: 'Ana Lopez', stars: 5, comment: 'Excellent service. I was able to track my loan and payments without any confusion. Highly recommended!', date: 'October 9, 2026' },
-];
+// Start empty — data is only created by real user actions
+export const adminApplications: ApplicationRecord[] = [];
+export const initialAdminLoans: AdminLoanRecord[] = [];
+export const borrowers: { id: string; name: string; phone: string; activeLoans: number; status: string }[] = [];
+export const seedReviews: Review[] = [];
 
 export const installments = [
   { number: 1, due: 'Oct 15', amount: 3667, status: 'PAID' },

@@ -3,8 +3,8 @@ import { Animated, Modal, NativeScrollEvent, NativeSyntheticEvent, Platform, Pre
 import Svg, { Circle, Ellipse, Path } from 'react-native-svg';
 
 import { initials, type IconName, type Role, type Screen } from './model';
-import { ThemeContext } from './theme';
 import { useAppStyles } from './styles';
+import { ThemeContext } from './theme';
 
 // ─── Shared components ────────────────────────────────────────────────────────
 
@@ -53,6 +53,13 @@ export function AppIcon({ name, size = 20, color }: {
           stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
           fill={color === 'currentColor' || color?.includes('#F') ? color : 'none'} />
       )}
+      {name === 'camera' && (<>
+        <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" {...s} />
+        <Circle cx="12" cy="13" r="4" {...s} />
+      </>)}
+      {name === 'upload' && (<>
+        <Path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" {...s} />
+      </>)}
     </Svg>
   );
 }
