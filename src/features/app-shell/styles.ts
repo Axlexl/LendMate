@@ -27,6 +27,8 @@ export function createStyles(palette: Palette) {
   headerIconBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: palette.background, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   headerIconBtnPressed: { backgroundColor: palette.greenMid },
   notifDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: palette.green, position: 'absolute', top: 7, right: 7, borderWidth: 1.5, borderColor: palette.surface },
+  notifBadge: { position: 'absolute', top: 4, right: 4, minWidth: 16, height: 16, borderRadius: 8, backgroundColor: palette.green, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  notifBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800', lineHeight: 12 },
   profileBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.navyCard, alignItems: 'center', justifyContent: 'center' },
   profileInitials: { color: '#FFFFFF', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
 

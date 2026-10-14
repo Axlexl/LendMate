@@ -4,9 +4,9 @@ import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Te
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { acceptTerms, fetchUserProfile, handleGoogleResponse, onAuthChange, registerWithEmail, signInWithEmail, signOut, useGoogleSignIn, type UserProfile } from '@/services/auth';
+import { acceptTerms, fetchUserProfile, handleGoogleResponse, onAuthChange, registerWithEmail, sendPasswordReset, signInWithEmail, signOut, useGoogleSignIn, type UserProfile } from '@/services/auth';
 import { AppIcon, Avatar, BrandMark, Btn, DetailRow, InputField, LoadingOverlay, LogoutModal, NavBar, PageTitle, StatusBadge, TermsScreen } from './components';
-import { adminApplications, borrowers, initialAdminLoans, initials, money, seedReviews, todayLong, type AdminLoanRecord, type ApplicationRecord, type IconName, type Review, type Role, type Screen } from './model';
+import { adminApplications, borrowers, defaultLoanProducts, initialAdminLoans, initials, money, seedReviews, todayLong, type AdminLoanRecord, type ApplicationRecord, type IconName, type LoanProduct, type Review, type Role, type Screen } from './model';
 import { createStyles } from './styles';
 import { ThemeContext, palettes } from './theme';
 // ─── Main app ─────────────────────────────────────────────────────────────────
@@ -28,11 +28,7 @@ export default function LendMateApp() {
     setScreen(target);
   }, []);
 
-  const [notifications, setNotifications] = useState([
-    { id: 'n1', title: 'Payment reminder', detail: '₱1,100 due October 15, 2026', icon: 'calendar' as const, read: false },
-    { id: 'n2', title: 'Application under review', detail: 'Application #10025 is being reviewed.', icon: 'file' as const, read: false },
-    { id: 'n3', title: 'Payment received', detail: 'Your October 1 payment was recorded.', icon: 'check' as const, read: true },
-  ]);
+  const [notifications, setNotifications] = useState<{ id: string; title: string; detail: string; icon: 'calendar' | 'file' | 'check' | 'bell' | 'clock'; read: boolean }[]>([]);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -65,6 +61,8 @@ export default function LendMateApp() {
         if (profile) {
           setFirebaseUser(profile);
           setFullName(profile.fullName);
+          setEmail(profile.email ?? '');
+          setPhone(profile.phone ?? '');
           setRole(profile.role as Role);
           setTermsAccepted(profile.termsAccepted);
           if (!profile.termsAccepted) {
@@ -94,6 +92,8 @@ export default function LendMateApp() {
         if (result.ok) {
           setFirebaseUser(result.profile);
           setFullName(result.profile.fullName);
+          setEmail(result.profile.email ?? '');
+          setPhone(result.profile.phone ?? '');
           setRole(result.profile.role as Role);
           setTermsAccepted(result.profile.termsAccepted);
           setFormError('');
@@ -159,6 +159,19 @@ export default function LendMateApp() {
   // ── Admin custom interest rate per application ────────────────────────────────
   // Maps appId -> admin-entered interest rate string
   const [adminRates, setAdminRates] = useState<Record<string, string>>({});
+  // ── Admin Loan Products ───────────────────────────────────────────────────────
+  const [loanProducts, setLoanProducts] = useState<LoanProduct[]>(defaultLoanProducts);
+  const [showLoanProductForm, setShowLoanProductForm] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<LoanProduct | null>(null);
+  const [lpName, setLpName] = useState('');
+  const [lpDescription, setLpDescription] = useState('');
+  const [lpMinAmount, setLpMinAmount] = useState('');
+  const [lpMaxAmount, setLpMaxAmount] = useState('');
+  const [lpDefaultTerm, setLpDefaultTerm] = useState('');
+  const [lpInterestRate, setLpInterestRate] = useState('');
+  const [lpPurposes, setLpPurposes] = useState<string[]>([]);
+  const [lpNewPurpose, setLpNewPurpose] = useState('');
+  const [lpFormError, setLpFormError] = useState('');
 
   const signIn = async () => {
     if (!email.includes('@') || password.length < 6) {
@@ -172,6 +185,8 @@ export default function LendMateApp() {
     if (result.ok) {
       setFirebaseUser(result.profile);
       setFullName(result.profile.fullName);
+      setEmail(result.profile.email ?? email);
+      setPhone(result.profile.phone ?? '');
       setRole(result.profile.role as Role);
       setTermsAccepted(result.profile.termsAccepted);
       setFormError('');
@@ -330,6 +345,25 @@ export default function LendMateApp() {
         setApprovedLoan(newLoan);
         setLoanRemaining(totalPayable);
       }
+      // Notify the borrower that their loan was approved and first payment is due
+      const installAmt = Math.ceil(totalPayable / (record.term ?? 3));
+      setNotifications((prev) => [
+        {
+          id: `notif-approved-${record.id}`,
+          title: 'Loan Approved!',
+          detail: `Your ${record.product} of ${money(record.amount)} has been approved. First payment: ${money(installAmt)}.`,
+          icon: 'check' as const,
+          read: false,
+        },
+        {
+          id: `notif-due-${record.id}`,
+          title: 'Payment Due Reminder',
+          detail: `Your first installment of ${money(installAmt)} is due at end of next month.`,
+          icon: 'calendar' as const,
+          read: false,
+        },
+        ...prev,
+      ]);
     }
   };
 
@@ -378,7 +412,11 @@ export default function LendMateApp() {
             accessibilityLabel="Notifications"
           >
             <AppIcon name="bell" size={19} color={p.navy} />
-            <View style={sh.notifDot} />
+            {notifications.some(n => !n.read) && (
+              <View style={[sh.notifBadge, { backgroundColor: p.green, borderColor: p.surface }]}>
+                <Text style={sh.notifBadgeText}>{notifications.filter(n => !n.read).length}</Text>
+              </View>
+            )}
           </Pressable>
         )}
         <Pressable
@@ -416,7 +454,13 @@ export default function LendMateApp() {
             </View>
           ))}
         </View>
-        <Btn title="Get Started" onPress={() => goTo('login')} />
+        <Btn title="Get Started" onPress={() => {
+          setTransitioning(true);
+          setTimeout(() => {
+            setTransitioning(false);
+            goTo('login');
+          }, 700);
+        }} />
         <Text style={[sh.splashNote, { color: p.muted }]}>Already have an account?{' '}
           <Text style={sh.splashNoteLink} onPress={() => goTo('login')}>Sign in</Text>
         </Text>
@@ -447,7 +491,20 @@ export default function LendMateApp() {
           <InputField label="Email" value={email} onChangeText={setEmail} placeholder="you@example.com" keyboardType="email-address" autoCapitalize="none" />
           <InputField label="Password" value={password} onChangeText={setPassword} placeholder="Enter your password" secureTextEntry />
 
-          <Pressable style={sh.forgotRow} onPress={() => setFormError('A password reset email will be sent to your address.')}>
+          <Pressable style={sh.forgotRow} onPress={async () => {
+            if (!email.trim() || !email.includes('@')) {
+              setFormError('Enter your email address above first, then tap Forgot Password.');
+              return;
+            }
+            setFormLoading(true);
+            const result = await sendPasswordReset(email.trim());
+            setFormLoading(false);
+            if (result.ok) {
+              setFormError('✓ Password reset email sent. Check your inbox (and spam folder).');
+            } else {
+              setFormError(result.error ?? 'Could not send reset email. Please try again.');
+            }
+          }}>
             <Text style={[sh.forgotText, { color: p.greenDark }]}>Forgot Password?</Text>
           </Pressable>
 
@@ -1168,16 +1225,16 @@ export default function LendMateApp() {
 
           <Text style={[sh.fieldLabel, { color: p.text }]}>Loan Product</Text>
           <View style={sh.choiceList}>
-            {[['Personal Loan', 'Flexible use'], ['Business Loan', 'Grow your business'], ['Education Loan', 'School expenses']].map(([label, note]) => (
-              <Pressable key={label} onPress={() => setLoanProduct(label)}
-                style={[sh.choiceRow, { backgroundColor: p.surface, borderColor: loanProduct === label ? p.green : p.line },
-                  loanProduct === label && { backgroundColor: p.greenPale }]}>
-                <View style={[sh.radio, { borderColor: loanProduct === label ? p.green : p.mutedLight }, loanProduct === label && sh.radioActive]}>
-                  {loanProduct === label && <View style={[sh.radioDot, { backgroundColor: p.green }]} />}
+            {loanProducts.map((prod) => (
+              <Pressable key={prod.id} onPress={() => setLoanProduct(prod.name)}
+                style={[sh.choiceRow, { backgroundColor: p.surface, borderColor: loanProduct === prod.name ? p.green : p.line },
+                  loanProduct === prod.name && { backgroundColor: p.greenPale }]}>
+                <View style={[sh.radio, { borderColor: loanProduct === prod.name ? p.green : p.mutedLight }, loanProduct === prod.name && sh.radioActive]}>
+                  {loanProduct === prod.name && <View style={[sh.radioDot, { backgroundColor: p.green }]} />}
                 </View>
                 <View style={sh.choiceCopy}>
-                  <Text style={[sh.choiceTitle, { color: p.text }]}>{label}</Text>
-                  <Text style={[sh.choiceNote, { color: p.muted }]}>{note}</Text>
+                  <Text style={[sh.choiceTitle, { color: p.text }]}>{prod.name}</Text>
+                  <Text style={[sh.choiceNote, { color: p.muted }]}>{prod.description} · {prod.interestRate}% interest · up to {money(prod.maxAmount)}</Text>
                 </View>
               </Pressable>
             ))}
@@ -1218,11 +1275,27 @@ export default function LendMateApp() {
           <Text style={[sh.fieldLabel, { color: p.text }]}>Purpose</Text>
           <View style={sh.pillRow}>
             {['Emergency', 'Education', 'Medical', 'Business', 'Other'].map((purpose) => (
-              <Pressable key={purpose} onPress={() => setLoanPurpose(purpose)}
+              <Pressable key={purpose} onPress={() => { setLoanPurpose(purpose); }}
                 style={[sh.pill, { backgroundColor: loanPurpose === purpose ? p.greenPale : p.surface, borderColor: loanPurpose === purpose ? p.green : p.line }]}>
                 <Text style={[sh.pillText, { color: loanPurpose === purpose ? p.greenDark : p.muted, fontWeight: loanPurpose === purpose ? '700' : '600' }]}>{purpose}</Text>
               </Pressable>
             ))}
+          </View>
+          {/* Custom purpose input shown when Other is selected or user types a custom reason */}
+          <View style={[sh.fieldWrap, { marginTop: 2 }]}>
+            <Text style={[sh.fieldLabel, { color: p.text }]}>
+              Specify reason <Text style={{ color: p.mutedLight, fontWeight: '400' }}>(optional – add your own)</Text>
+            </Text>
+            <View style={[sh.inputWrap, { backgroundColor: p.surface, borderColor: p.line }]}>
+              <TextInput
+                value={loanPurpose === 'Emergency' || loanPurpose === 'Education' || loanPurpose === 'Medical' || loanPurpose === 'Business' || loanPurpose === 'Other' ? '' : loanPurpose}
+                onChangeText={(v) => { if (v.trim()) setLoanPurpose(v); }}
+                placeholder="e.g. Home renovation, Car repair…"
+                placeholderTextColor={p.mutedLight}
+                style={[sh.inputInner, { color: p.text }]}
+                maxLength={80}
+              />
+            </View>
           </View>
 
           <View style={[sh.estimateCard, { backgroundColor: p.greenPale }]}>
@@ -1765,6 +1838,7 @@ export default function LendMateApp() {
               ['users', 'Borrowers', 'admin-borrowers'],
               ['wallet', 'Loans', 'admin-loans'],
               ['calendar', 'Payments', 'admin-payments'],
+              ['star', 'Loan Products', 'admin-loan-products'],
             ] as [IconName, string, Screen][]).map(([icon, label, dest]) => (
               <Pressable key={label} onPress={() => goTo(dest)} style={({ pressed }) => [sh.quickCard, { backgroundColor: p.surface, borderColor: p.line }, pressed && sh.cardPressed]}>
                 <View style={[sh.quickIcon, { backgroundColor: p.greenPale }]}><AppIcon name={icon} size={19} color={p.green} /></View>
@@ -2752,6 +2826,229 @@ export default function LendMateApp() {
     );
   };
 
+  // ── Admin Loan Products ───────────────────────────────────────────────────────
+  const renderAdminLoanProducts = () => {
+    const openAdd = () => {
+      setEditingProduct(null);
+      setLpName(''); setLpDescription(''); setLpMinAmount(''); setLpMaxAmount('');
+      setLpDefaultTerm('6'); setLpInterestRate('10'); setLpPurposes([]); setLpNewPurpose(''); setLpFormError('');
+      setShowLoanProductForm(true);
+    };
+    const openEdit = (prod: LoanProduct) => {
+      setEditingProduct(prod);
+      setLpName(prod.name); setLpDescription(prod.description);
+      setLpMinAmount(String(prod.minAmount)); setLpMaxAmount(String(prod.maxAmount));
+      setLpDefaultTerm(String(prod.defaultTerm)); setLpInterestRate(String(prod.interestRate));
+      setLpPurposes([...prod.purposes]); setLpNewPurpose(''); setLpFormError('');
+      setShowLoanProductForm(true);
+    };
+    const deleteProd = (id: string) => {
+      setLoanProducts((prev) => prev.filter((p) => p.id !== id));
+    };
+    const removePurpose = (purpose: string) => {
+      setLpPurposes((prev) => prev.filter((item) => item !== purpose));
+    };
+    const addPurpose = () => {
+      const trimmed = lpNewPurpose.trim();
+      if (!trimmed || lpPurposes.includes(trimmed)) { setLpNewPurpose(''); return; }
+      setLpPurposes((prev) => [...prev, trimmed]);
+      setLpNewPurpose('');
+    };
+    const saveProduct = () => {
+      if (!lpName.trim()) { setLpFormError('Product name is required.'); return; }
+      const min = Number(lpMinAmount);
+      const max = Number(lpMaxAmount);
+      const term = Number(lpDefaultTerm);
+      const rate = Number(lpInterestRate);
+      if (!min || min < 100) { setLpFormError('Enter a valid minimum amount (min ₱100).'); return; }
+      if (!max || max < min) { setLpFormError('Maximum amount must be greater than minimum.'); return; }
+      if (!term || term < 1) { setLpFormError('Enter a valid default term (months).'); return; }
+      if (isNaN(rate) || rate < 0 || rate > 100) { setLpFormError('Enter an interest rate between 0 and 100%.'); return; }
+      if (editingProduct) {
+        const updated: LoanProduct = { ...editingProduct, name: lpName.trim(), description: lpDescription.trim(), minAmount: min, maxAmount: max, defaultTerm: term, interestRate: rate, purposes: lpPurposes };
+        setLoanProducts((prev) => prev.map((x) => x.id === editingProduct.id ? updated : x));
+      } else {
+        const newProd: LoanProduct = { id: `lp${Date.now()}`, name: lpName.trim(), description: lpDescription.trim(), minAmount: min, maxAmount: max, defaultTerm: term, interestRate: rate, purposes: lpPurposes };
+        setLoanProducts((prev) => [...prev, newProd]);
+      }
+      setShowLoanProductForm(false);
+      setEditingProduct(null);
+    };
+
+    return (
+      <View style={[sh.flex, { backgroundColor: p.background }]}>
+        <Header />
+        <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]} keyboardShouldPersistTaps="handled">
+          {/* Header row */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+            <View>
+              <Text style={[sh.pageTitleText, { color: p.navy }]}>Loan Products</Text>
+              <Text style={[sh.pageTitleSub, { color: p.muted }]}>Manage available loan offerings</Text>
+            </View>
+            <Pressable
+              onPress={openAdd}
+              style={({ pressed }) => [{ paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, backgroundColor: pressed ? p.greenMid : p.green }]}
+            >
+              <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>+ Add Product</Text>
+            </Pressable>
+          </View>
+
+          {loanProducts.length === 0 && (
+            <View style={[sh.infoBox, { backgroundColor: p.surface, borderLeftColor: p.muted }]}>
+              <Text style={[sh.infoBoxBody, { color: p.muted }]}>No loan products yet. Tap + Add Product to create one.</Text>
+            </View>
+          )}
+
+          {loanProducts.map((prod) => (
+            <View key={prod.id} style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line, marginBottom: 12 }]}>
+              {/* Product header */}
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: p.navy, fontSize: 16, fontWeight: '800' }}>{prod.name}</Text>
+                  <Text style={{ color: p.muted, fontSize: 12, marginTop: 2 }}>{prod.description}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable onPress={() => openEdit(prod)} style={({ pressed }) => [{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: pressed ? p.greenMid : p.greenPale }]}>
+                    <Text style={{ color: p.greenDark, fontWeight: '700', fontSize: 12 }}>Edit</Text>
+                  </Pressable>
+                  <Pressable onPress={() => deleteProd(prod.id)} style={({ pressed }) => [{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: pressed ? '#ffc8c8' : p.redPale }]}>
+                    <Text style={{ color: p.red, fontWeight: '700', fontSize: 12 }}>Delete</Text>
+                  </Pressable>
+                </View>
+              </View>
+              {/* Details */}
+              <DetailRow label="Amount Range" value={`${money(prod.minAmount)} – ${money(prod.maxAmount)}`} />
+              <DetailRow label="Default Term" value={`${prod.defaultTerm} months`} />
+              <DetailRow label="Interest Rate" value={`${prod.interestRate}%`} last={prod.purposes.length === 0} />
+              {/* Purposes */}
+              {prod.purposes.length > 0 && (
+                <View style={{ paddingTop: 10 }}>
+                  <Text style={{ color: p.muted, fontSize: 11, fontWeight: '700', letterSpacing: 0.4, marginBottom: 6 }}>PURPOSES</Text>
+                  <View style={sh.pillRow}>
+                    {prod.purposes.map((purpose) => (
+                      <View key={purpose} style={[sh.pill, { backgroundColor: p.greenPale, borderColor: p.green }]}>
+                        <Text style={[sh.pillText, { color: p.greenDark, fontWeight: '600' }]}>{purpose}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </View>
+          ))}
+        </ScrollView>
+
+        {/* ── Add / Edit Modal ────────────────────────────────────────── */}
+        <Modal visible={showLoanProductForm} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setShowLoanProductForm(false)}>
+          <Pressable style={sh.modalBackdrop} onPress={() => setShowLoanProductForm(false)}>
+            <Pressable style={[sh.payModalCard, { backgroundColor: p.surface, maxHeight: '92%' }]} onPress={() => {}}>
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <Text style={[sh.payModalTitle, { color: p.navy }]}>{editingProduct ? 'Edit Loan Product' : 'New Loan Product'}</Text>
+                <Text style={[sh.payModalSub, { color: p.muted }]}>{editingProduct ? 'Update the product details.' : 'Fill in details for the new loan offering.'}</Text>
+
+                <View style={sh.fieldWrap}>
+                  <Text style={[sh.fieldLabel, { color: p.text }]}>Product Name *</Text>
+                  <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
+                    <TextInput value={lpName} onChangeText={setLpName} placeholder="e.g. Personal Loan" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
+                  </View>
+                </View>
+
+                <View style={sh.fieldWrap}>
+                  <Text style={[sh.fieldLabel, { color: p.text }]}>Description</Text>
+                  <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
+                    <TextInput value={lpDescription} onChangeText={setLpDescription} placeholder="Short description" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={[sh.fieldWrap, { flex: 1 }]}>
+                    <Text style={[sh.fieldLabel, { color: p.text }]}>Min Amount (₱) *</Text>
+                    <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
+                      <TextInput value={lpMinAmount} onChangeText={setLpMinAmount} placeholder="1000" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
+                    </View>
+                  </View>
+                  <View style={[sh.fieldWrap, { flex: 1 }]}>
+                    <Text style={[sh.fieldLabel, { color: p.text }]}>Max Amount (₱) *</Text>
+                    <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
+                      <TextInput value={lpMaxAmount} onChangeText={setLpMaxAmount} placeholder="500000" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
+                    </View>
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={[sh.fieldWrap, { flex: 1 }]}>
+                    <Text style={[sh.fieldLabel, { color: p.text }]}>Default Term (mo) *</Text>
+                    <View style={sh.termRow}>
+                      {[3, 6, 12].map((t) => (
+                        <Pressable key={t} onPress={() => setLpDefaultTerm(String(t))}
+                          style={[sh.termChip, { flex: 0, width: 48 }, String(t) === lpDefaultTerm && sh.termChipActive]}>
+                          <Text style={[sh.termChipNum, String(t) === lpDefaultTerm && sh.termChipNumActive]}>{t}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line, marginTop: 6 }]}>
+                      <TextInput value={lpDefaultTerm} onChangeText={setLpDefaultTerm} placeholder="6" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
+                    </View>
+                  </View>
+                  <View style={[sh.fieldWrap, { flex: 1 }]}>
+                    <Text style={[sh.fieldLabel, { color: p.text }]}>Interest Rate (%) *</Text>
+                    <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
+                      <TextInput value={lpInterestRate} onChangeText={setLpInterestRate} placeholder="10" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
+                    </View>
+                  </View>
+                </View>
+
+                {/* Purposes */}
+                <View style={sh.fieldWrap}>
+                  <Text style={[sh.fieldLabel, { color: p.text }]}>Loan Purposes</Text>
+                  <View style={sh.pillRow}>
+                    {lpPurposes.map((purpose) => (
+                      <Pressable key={purpose} onPress={() => removePurpose(purpose)}
+                        style={[sh.pill, { backgroundColor: p.greenPale, borderColor: p.green, flexDirection: 'row', gap: 4, alignItems: 'center' }]}>
+                        <Text style={[sh.pillText, { color: p.greenDark }]}>{purpose}</Text>
+                        <Text style={{ color: p.red, fontSize: 14, fontWeight: '800', lineHeight: 16 }}>×</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                    <View style={[sh.inputWrap, { flex: 1, backgroundColor: p.background, borderColor: p.line }]}>
+                      <TextInput
+                        value={lpNewPurpose}
+                        onChangeText={setLpNewPurpose}
+                        placeholder="Add a purpose…"
+                        placeholderTextColor={p.mutedLight}
+                        style={[sh.inputInner, { color: p.text }]}
+                        onSubmitEditing={addPurpose}
+                        returnKeyType="done"
+                      />
+                    </View>
+                    <Pressable onPress={addPurpose} style={({ pressed }) => [{ paddingHorizontal: 16, height: 50, borderRadius: 11, backgroundColor: pressed ? p.greenMid : p.green, alignItems: 'center', justifyContent: 'center' }]}>
+                      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>Add</Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                {lpFormError ? <View style={[sh.errorBox, { backgroundColor: p.redPale, marginBottom: 6 }]}><Text style={[sh.errorText, { color: p.red }]}>{lpFormError}</Text></View> : null}
+
+                <View style={sh.modalActions}>
+                  <Pressable style={({ pressed }) => [sh.modalBtnCancel, { backgroundColor: p.background, borderColor: p.line }, pressed && { opacity: 0.7 }]}
+                    onPress={() => { setShowLoanProductForm(false); setLpFormError(''); }}>
+                    <Text style={[sh.modalBtnCancelText, { color: p.text }]}>Cancel</Text>
+                  </Pressable>
+                  <Pressable style={({ pressed }) => [sh.modalBtnConfirm, pressed && sh.modalBtnConfirmPressed]}
+                    onPress={saveProduct}>
+                    <Text style={sh.modalBtnConfirmText}>{editingProduct ? 'Save Changes' : 'Create Product'}</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <NavBar role="admin" screen={screen} onSelect={goTo} />
+      </View>
+    );
+  };
+
   // ── Router ────────────────────────────────────────────────────────────────────
   // ── Auth loading gate ───────────────────────────────────────────────────────
   if (authLoading) {
@@ -2785,6 +3082,7 @@ export default function LendMateApp() {
   else if (screen === 'admin-borrower-detail') content = renderAdminBorrowerDetail();
   else if (screen === 'admin-reviews') content = renderAdminReviews();
   else if (screen === 'admin-payments') content = renderAdminPayments();
+  else if (screen === 'admin-loan-products') content = renderAdminLoanProducts();
   else content = renderAdminLoans();
 
   return (

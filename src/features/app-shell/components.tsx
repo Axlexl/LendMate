@@ -72,7 +72,7 @@ export function BrandMark({ size = 'full', light = false }: { size?: 'full' | 'c
   const greenColor = light ? '#A5E1B6' : p.green;
   return (
     <View style={compact ? sh.brandLockupCompact : sh.brandLockup}>
-      <Svg width={compact ? 36 : 96} height={compact ? 32 : 80} viewBox="0 0 120 100">
+      <Svg width={compact ? 36 : 110} height={compact ? 32 : 92} viewBox="0 0 120 100">
         <Path d="M17 12c-6 0-10 4-10 10v43c0 16 12 27 29 27h34c7 0 13-3 18-8l17-17c3-3 3-8 0-11-3-3-8-3-11 0L79 71c-3 3-6 4-10 4H45c-5 0-8-4-8-9V23c0-7-5-11-10-11z" fill={navyColor} />
         <Path d="M43 48V17c0-5 5-7 9-4l22 20 22-20c4-3 9-1 9 4v42" fill="none" stroke={greenColor} strokeWidth="13" strokeLinecap="round" strokeLinejoin="round" />
         <Ellipse cx="75" cy="53" rx="13" ry="5.5" fill={greenColor} />
