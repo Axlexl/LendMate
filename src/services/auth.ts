@@ -24,26 +24,26 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
 import {
   createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signInWithCredential,
-  GoogleAuthProvider,
-  updateProfile,
-  sendPasswordResetEmail,
   signOut as firebaseSignOut,
+  GoogleAuthProvider,
   onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+  updateProfile,
   type User,
 } from 'firebase/auth';
 import {
   doc,
   getDoc,
-  setDoc,
   serverTimestamp,
+  setDoc,
   Timestamp,
 } from 'firebase/firestore';
-import * as AuthSession from 'expo-auth-session';
-import * as WebBrowser from 'expo-web-browser';
 
 import { auth, db } from './firebase';
 
@@ -206,8 +206,6 @@ export async function sendPasswordReset(email: string): Promise<{ ok: boolean; e
 export function useGoogleSignIn() {
   const redirectUri = AuthSession.makeRedirectUri({
     scheme: 'lendmate',
-    // On web use the current origin; on native use the Expo proxy
-    ...(typeof window !== 'undefined' ? { useProxy: false } : { useProxy: true }),
   });
 
   const discovery: AuthSession.DiscoveryDocument = {

@@ -28,8 +28,6 @@ export type ApplicationRecord = {
   isCustomAmount?: boolean;   // true when amount wasn't from preset choices
   adminInterestRate?: number; // 0–100, set by admin before approving custom amounts
 };
-  status: 'PENDING' | 'UNDER REVIEW' | 'APPROVED' | 'REJECTED';
-};
 
 export type AdminLoanRecord = {
   id: string; borrower: string; amount: number; interest: number;

@@ -1361,7 +1361,7 @@ export default function LendMateApp() {
               <Text style={sh.heroEyebrow}>LOAN AMOUNT</Text>
               <StatusBadge status={loanRemaining === 0 ? 'PAID' : 'ACTIVE'} />
             </View>
-            <Text style={sh.loanHeroAmount}>{money(approvedLoan.amount)}</Text>
+            <Text style={sh.loanheroAmount}>{money(approvedLoan.amount)}</Text>
             <Text style={sh.loanHeroSub}>Remaining balance {money(loanRemaining)}</Text>
             <View style={sh.progressTrack}>
               <View style={[sh.progressFill, { width: `${Math.min(100, Math.max(0, paidPercent))}%` }]} />
@@ -2398,7 +2398,7 @@ export default function LendMateApp() {
       };
       setAdminLoans((prev) => prev.map((l) => l.id === selectedLoan.id ? updatedLoan : l));
       setSelectedLoan(updatedLoan);
-      setEditMode(false);
+      setLoanEditMode(false);
       setEditError('');
     };
 
@@ -2421,7 +2421,7 @@ export default function LendMateApp() {
               </Pressable>
             </View>
             <Pressable
-              onPress={() => { setEditMode((v) => !v); setEditError(''); }}
+              onPress={() => { setLoanEditMode((v) => !v); setEditError(''); }}
               style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9, borderWidth: 1.5, borderColor: loanEditMode ? p.muted : p.green, backgroundColor: loanEditMode ? p.background : p.greenPale }}
             >
               <Text style={{ color: loanEditMode ? p.muted : p.greenDark, fontSize: 13, fontWeight: '700' }}>
@@ -2436,7 +2436,7 @@ export default function LendMateApp() {
               <Text style={sh.heroEyebrow}>LOAN #{selectedLoan.id} · {selectedLoan.borrower}</Text>
               <StatusBadge status={selectedLoan.status} />
             </View>
-            <Text style={sh.loanHeroAmount}>{money(selectedLoan.amount)}</Text>
+            <Text style={sh.loanheroAmount}>{money(selectedLoan.amount)}</Text>
             <Text style={sh.loanHeroSub}>
               Remaining {money(selectedLoan.remaining)} · {paidPercent}% paid
             </Text>

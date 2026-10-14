@@ -5,16 +5,24 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/lendmate-icon.png",
-    "scheme": ["lendmate", "com.googleusercontent.apps.1060609617260"],
+    "scheme": [
+      "lendmate",
+      "com.googleusercontent.apps.1060609617260"
+    ],
     "userInterfaceStyle": "light",
     "ios": {
+      "bundleIdentifier": "ph.lendmate.app",
       "icon": "./assets/images/lendmate-icon.png"
     },
     "android": {
+      "package": "ph.lendmate.app",
       "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
-        "foregroundImage": "./assets/images/lendmate-icon.png"
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png",
+        "backgroundColor": "#FFFFFF"
       },
+      "icon": "./assets/images/lendmate-icon.png",
       "predictiveBackGestureEnabled": false
     },
     "web": {
@@ -36,6 +44,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "200197bb-1532-49cf-b9b7-ddc2748e1182"
+      }
     }
   }
 }
