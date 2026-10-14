@@ -153,6 +153,12 @@ export default function LendMateApp() {
   const [editTerm, setEditTerm] = useState('');
   const [editStatus, setEditStatus] = useState<'ACTIVE' | 'PAID'>('ACTIVE');
   const [editError, setEditError] = useState('');
+  // ── Admin interest rate input per application ─────────────────────────────────
+  // Maps application id → admin-entered interest rate string (e.g. "15")
+  const [adminAppInterestRates, setAdminAppInterestRates] = useState<Record<string, string>>({});
+  // ── Admin custom interest rate per application ────────────────────────────────
+  // Maps appId -> admin-entered interest rate string
+  const [adminRates, setAdminRates] = useState<Record<string, string>>({});
 
   const signIn = async () => {
     if (!email.includes('@') || password.length < 6) {
@@ -280,6 +286,8 @@ export default function LendMateApp() {
       setFormError('Enter a loan amount from ₱1,000 to ₱500,000.');
       return;
     }
+    const presets = [5000, 10000, 20000, 50000];
+    const isCustomAmount = !presets.includes(amount);
     const appId = String(10026 + adminApps.filter((r) => Number(r.id) >= 10026).length);
     const newApplication: ApplicationRecord = {
       id: appId,
@@ -288,6 +296,7 @@ export default function LendMateApp() {
       product: loanProduct,
       term: loanTerm,
       status: 'UNDER REVIEW',
+      isCustomAmount,
     };
     setApplication(newApplication);
     setAdminApps((prev) => [{ ...newApplication, status: 'PENDING' }, ...prev]);
@@ -304,7 +313,12 @@ export default function LendMateApp() {
       setApplicationDecision(status);
     }
     if (status === 'APPROVED') {
-      const interest = Math.round(record.amount * 0.1);
+      // Use admin-set rate for custom amounts, default 10% for preset amounts
+      const adminRate = adminAppInterestRates[record.id];
+      const ratePercent = record.isCustomAmount && adminRate
+        ? Math.max(0, Math.min(100, Number(adminRate)))
+        : 10;
+      const interest = Math.round(record.amount * (ratePercent / 100));
       const totalPayable = record.amount + interest;
       const newLoan: AdminLoanRecord = {
         id: `1${record.id}`, borrower: record.borrower, amount: record.amount,
@@ -1152,12 +1166,14 @@ export default function LendMateApp() {
         <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]} keyboardShouldPersistTaps="handled">
           <PageTitle title="Apply for a Loan" subtitle="Choose product, amount, and term." onBack={() => goTo('dashboard')} />
 
-          <Text style={sh.fieldLabel}>Loan Product</Text>
+          <Text style={[sh.fieldLabel, { color: p.text }]}>Loan Product</Text>
           <View style={sh.choiceList}>
             {[['Personal Loan', 'Flexible use'], ['Business Loan', 'Grow your business'], ['Education Loan', 'School expenses']].map(([label, note]) => (
-              <Pressable key={label} onPress={() => setLoanProduct(label)} style={[sh.choiceRow, loanProduct === label && sh.choiceRowActive]}>
-                <View style={[sh.radio, loanProduct === label && sh.radioActive]}>
-                  {loanProduct === label && <View style={sh.radioDot} />}
+              <Pressable key={label} onPress={() => setLoanProduct(label)}
+                style={[sh.choiceRow, { backgroundColor: p.surface, borderColor: loanProduct === label ? p.green : p.line },
+                  loanProduct === label && { backgroundColor: p.greenPale }]}>
+                <View style={[sh.radio, { borderColor: loanProduct === label ? p.green : p.mutedLight }, loanProduct === label && sh.radioActive]}>
+                  {loanProduct === label && <View style={[sh.radioDot, { backgroundColor: p.green }]} />}
                 </View>
                 <View style={sh.choiceCopy}>
                   <Text style={[sh.choiceTitle, { color: p.text }]}>{label}</Text>
@@ -1167,54 +1183,83 @@ export default function LendMateApp() {
             ))}
           </View>
 
-          <Text style={sh.fieldLabel}>Amount</Text>
-          <View style={sh.amountRow}>
-            <Text style={sh.currencySign}>₱</Text>
+          <Text style={[sh.fieldLabel, { color: p.text }]}>Amount</Text>
+          <View style={[sh.amountRow, { backgroundColor: p.surface, borderColor: p.line }]}>
+            <Text style={[sh.currencySign, { color: p.greenDark }]}>₱</Text>
             <TextInput
               value={loanAmount}
               onChangeText={setLoanAmount}
               keyboardType="numeric"
-              style={sh.amountInput}
+              style={[sh.amountInput, { color: p.navy }]}
               placeholder="10,000"
               placeholderTextColor={p.mutedLight}
             />
           </View>
           <View style={sh.presets}>
-            {[5000, 10000, 20000, 50000].map((p) => (
-              <Pressable key={p} onPress={() => setLoanAmount(String(p))} style={[sh.preset, amt === p && sh.presetActive]}>
-                <Text style={[sh.presetText, amt === p && sh.presetTextActive]}>{money(p)}</Text>
+            {[5000, 10000, 20000, 50000].map((preset) => (
+              <Pressable key={preset} onPress={() => setLoanAmount(String(preset))}
+                style={[sh.preset, { backgroundColor: amt === preset ? p.greenPale : p.surface, borderColor: amt === preset ? p.green : p.line }]}>
+                <Text style={[sh.presetText, { color: amt === preset ? p.greenDark : p.muted }]}>{money(preset)}</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={sh.fieldLabel}>Repayment Term</Text>
+          <Text style={[sh.fieldLabel, { color: p.text }]}>Repayment Term</Text>
           <View style={sh.termRow}>
             {[3, 6, 12].map((t) => (
-              <Pressable key={t} onPress={() => setLoanTerm(t)} style={[sh.termChip, loanTerm === t && sh.termChipActive]}>
-                <Text style={[sh.termChipNum, loanTerm === t && sh.termChipNumActive]}>{t}</Text>
-                <Text style={[sh.termChipLabel, loanTerm === t && sh.termChipLabelActive]}>mo</Text>
+              <Pressable key={t} onPress={() => setLoanTerm(t)}
+                style={[sh.termChip, { backgroundColor: loanTerm === t ? p.greenPale : p.surface, borderColor: loanTerm === t ? p.green : p.line }]}>
+                <Text style={[sh.termChipNum, { color: loanTerm === t ? p.greenDark : p.text }]}>{t}</Text>
+                <Text style={[sh.termChipLabel, { color: loanTerm === t ? p.greenDark : p.muted }]}>mo</Text>
               </Pressable>
             ))}
           </View>
 
-          <Text style={sh.fieldLabel}>Purpose</Text>
+          <Text style={[sh.fieldLabel, { color: p.text }]}>Purpose</Text>
           <View style={sh.pillRow}>
-            {['Emergency', 'Education', 'Medical', 'Business', 'Other'].map((p) => (
-              <Pressable key={p} onPress={() => setLoanPurpose(p)} style={[sh.pill, loanPurpose === p && sh.pillActive]}>
-                <Text style={[sh.pillText, loanPurpose === p && sh.pillTextActive]}>{p}</Text>
+            {['Emergency', 'Education', 'Medical', 'Business', 'Other'].map((purpose) => (
+              <Pressable key={purpose} onPress={() => setLoanPurpose(purpose)}
+                style={[sh.pill, { backgroundColor: loanPurpose === purpose ? p.greenPale : p.surface, borderColor: loanPurpose === purpose ? p.green : p.line }]}>
+                <Text style={[sh.pillText, { color: loanPurpose === purpose ? p.greenDark : p.muted, fontWeight: loanPurpose === purpose ? '700' : '600' }]}>{purpose}</Text>
               </Pressable>
             ))}
           </View>
 
           <View style={[sh.estimateCard, { backgroundColor: p.greenPale }]}>
-            <Text style={[sh.estimateLabel, { color: p.greenDark }]}>ESTIMATED MONTHLY PAYMENT</Text>
+            <Text style={[sh.estimateLabel, { color: p.greenDark }]}>LOAN BREAKDOWN</Text>
             <Text style={[sh.estimateAmount, { color: p.navy }]}>{monthlyEst ? money(monthlyEst) : '—'}</Text>
-            <Text style={[sh.estimateNote, { color: p.muted }]}>
-              {monthlyEst ? 'Illustration only. Final terms set after review.' : 'Enter an amount to see an estimate.'}
+            <Text style={[{ color: p.greenDark, fontSize: 11, fontWeight: '700', marginBottom: 10 }]}>/ month</Text>
+            {monthlyEst ? (
+              <View style={{ gap: 6 }}>
+                {[
+                  ['Principal', money(Number(loanAmount.replace(/,/g, '')) || 0)],
+                  ['Interest (10%)', money(Math.round((Number(loanAmount.replace(/,/g, '')) || 0) * 0.1))],
+                  ['Total Payable', money(Math.round((Number(loanAmount.replace(/,/g, '')) || 0) * 1.1))],
+                  ['Term', `${loanTerm} month${loanTerm !== 1 ? 's' : ''}`],
+                  ['Monthly Payment', money(monthlyEst)],
+                ].map(([label, val]) => (
+                  <View key={label} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={{ color: p.muted, fontSize: 12 }}>{label}</Text>
+                    <Text style={{ color: p.navy, fontSize: 12, fontWeight: '700' }}>{val}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {/* Custom amount notice */}
+            {[5000, 10000, 20000, 50000].includes(Number(loanAmount.replace(/,/g, ''))) === false && Number(loanAmount.replace(/,/g, '')) >= 1000 ? (
+              <View style={{ marginTop: 10, backgroundColor: p.amberPale, borderRadius: 8, padding: 10 }}>
+                <Text style={{ color: p.amber, fontSize: 12, fontWeight: '700', marginBottom: 2 }}>Custom Amount</Text>
+                <Text style={{ color: p.muted, fontSize: 11, lineHeight: 16 }}>
+                  This amount is outside the standard presets. The interest rate will be reviewed and set by the lending officer before approval.
+                </Text>
+              </View>
+            ) : null}
+            <Text style={[sh.estimateNote, { color: p.muted, marginTop: 10 }]}>
+              {monthlyEst ? 'Illustration only. Final terms set after review.' : 'Enter an amount to see the breakdown.'}
             </Text>
           </View>
 
-          {formError ? <View style={sh.errorBox}><Text style={sh.errorText}>{formError}</Text></View> : null}
+          {formError ? <View style={[sh.errorBox, { backgroundColor: p.redPale }]}><Text style={[sh.errorText, { color: p.red }]}>{formError}</Text></View> : null}
           <Btn title="Submit Application" onPress={submitApplication} />
         </ScrollView>
         <NavBar role="borrower" screen={screen} onSelect={goTo} />
@@ -1920,7 +1965,17 @@ export default function LendMateApp() {
                       <Text style={[sh.actionBtnViewText, { color: p.navy }]}>{isOpen ? 'Close' : 'View'}</Text>
                     </Pressable>
                     {(item.status === 'PENDING' || item.status === 'UNDER REVIEW') && (<>
-                      <Pressable onPress={() => decide(item, 'APPROVED')} style={({ pressed }) => [sh.actionBtnBase, sh.actionBtnApprove, pressed && sh.actionBtnApprovePressed]}>
+                      <Pressable
+                        onPress={() => {
+                          if (item.isCustomAmount && !adminAppInterestRates[item.id]) return;
+                          decide(item, 'APPROVED');
+                        }}
+                        style={({ pressed }) => [
+                          sh.actionBtnBase, sh.actionBtnApprove,
+                          item.isCustomAmount && !adminAppInterestRates[item.id] && { opacity: 0.35 },
+                          pressed && sh.actionBtnApprovePressed,
+                        ]}
+                      >
                         <Text style={sh.actionBtnApproveText}>Approve</Text>
                       </Pressable>
                       <Pressable onPress={() => decide(item, 'REJECTED')} style={({ pressed }) => [sh.actionBtnBase, sh.actionBtnReject, pressed && sh.actionBtnRejectPressed]}>
@@ -1935,9 +1990,63 @@ export default function LendMateApp() {
                     <DetailRow label="Applicant" value={item.borrower} />
                     <DetailRow label="Requested" value={money(item.amount)} />
                     <DetailRow label="Product" value={item.product} />
+                    <DetailRow label="Term" value={`${item.term ?? 3} months`} />
                     <DetailRow label="Status" value={item.status} last />
-                    {item.status === 'APPROVED' && <Text style={sh.successTextSmall}>Approved.</Text>}
-                    {item.status === 'REJECTED' && <Text style={sh.rejectTextSmall}>Rejected.</Text>}
+
+                    {/* ── Custom amount: admin sets interest rate before approving ── */}
+                    {item.isCustomAmount && (item.status === 'PENDING' || item.status === 'UNDER REVIEW') && (
+                      <View style={{ marginTop: 12, padding: 12, backgroundColor: p.amberPale, borderRadius: 10, borderWidth: 1, borderColor: p.amber }}>
+                        <Text style={{ color: p.amber, fontSize: 11, fontWeight: '800', letterSpacing: 0.4, marginBottom: 6 }}>
+                          CUSTOM AMOUNT — SET INTEREST RATE
+                        </Text>
+                        <Text style={{ color: p.muted, fontSize: 12, marginBottom: 10, lineHeight: 17 }}>
+                          This borrower requested {money(item.amount)}, which is outside the standard presets.
+                          Set an interest rate before approving.
+                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', height: 44, borderWidth: 1.5, borderColor: p.line, borderRadius: 10, backgroundColor: p.surface, paddingHorizontal: 12 }}>
+                            <TextInput
+                              value={adminAppInterestRates[item.id] ?? ''}
+                              onChangeText={(v) => setAdminAppInterestRates((prev) => ({ ...prev, [item.id]: v.replace(/[^0-9.]/g, '') }))}
+                              keyboardType="numeric"
+                              placeholder="e.g. 12"
+                              placeholderTextColor={p.mutedLight}
+                              style={{ flex: 1, color: p.text, fontSize: 16, fontWeight: '700' }}
+                            />
+                            <Text style={{ color: p.muted, fontSize: 16, fontWeight: '700' }}>%</Text>
+                          </View>
+                          {adminAppInterestRates[item.id] ? (
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={{ color: p.muted, fontSize: 11 }}>Interest</Text>
+                              <Text style={{ color: p.navy, fontSize: 14, fontWeight: '800' }}>
+                                {money(Math.round(item.amount * (Number(adminAppInterestRates[item.id]) / 100)))}
+                              </Text>
+                              <Text style={{ color: p.muted, fontSize: 11 }}>Total</Text>
+                              <Text style={{ color: p.navy, fontSize: 13, fontWeight: '700' }}>
+                                {money(item.amount + Math.round(item.amount * (Number(adminAppInterestRates[item.id]) / 100)))}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        {/* Require rate before approving */}
+                        {!adminAppInterestRates[item.id] && (
+                          <Text style={{ color: p.amber, fontSize: 11, fontStyle: 'italic' }}>
+                            Enter a rate above to enable approval.
+                          </Text>
+                        )}
+                      </View>
+                    )}
+
+                    {item.status === 'APPROVED' && (
+                      <View style={{ marginTop: 8 }}>
+                        <Text style={[sh.successTextSmall, { color: p.greenDark }]}>
+                          Approved · Interest: {item.isCustomAmount && adminAppInterestRates[item.id]
+                            ? `${adminAppInterestRates[item.id]}%`
+                            : '10% (standard)'}
+                        </Text>
+                      </View>
+                    )}
+                    {item.status === 'REJECTED' && <Text style={[sh.rejectTextSmall, { color: p.red }]}>Rejected.</Text>}
                   </View>
                 )}
               </Pressable>

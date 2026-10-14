@@ -25,6 +25,10 @@ export type ApplicationRecord = {
   id: string; borrower: string; amount: number; product: string;
   term?: number;
   status: 'PENDING' | 'UNDER REVIEW' | 'APPROVED' | 'REJECTED';
+  isCustomAmount?: boolean;   // true when amount wasn't from preset choices
+  adminInterestRate?: number; // 0–100, set by admin before approving custom amounts
+};
+  status: 'PENDING' | 'UNDER REVIEW' | 'APPROVED' | 'REJECTED';
 };
 
 export type AdminLoanRecord = {
