@@ -27,22 +27,30 @@
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import {
-  createUserWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  sendPasswordResetEmail,
-  signInWithCredential,
-  signInWithEmailAndPassword,
-  updateProfile,
-  type User,
+    createUserWithEmailAndPassword,
+    EmailAuthProvider,
+    signOut as firebaseSignOut,
+    GoogleAuthProvider,
+    onAuthStateChanged,
+    reauthenticateWithCredential,
+    sendPasswordResetEmail,
+    signInWithCredential,
+    signInWithEmailAndPassword,
+    updatePassword,
+    updateProfile,
+    type User,
 } from 'firebase/auth';
 import {
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-  Timestamp,
+    collection,
+    deleteDoc,
+    doc,
+    getDoc,
+    onSnapshot,
+    query,
+    serverTimestamp,
+    setDoc,
+    Timestamp,
+    where,
 } from 'firebase/firestore';
 
 import { auth, db } from './firebase';
@@ -325,6 +333,108 @@ export async function createAdminAccount(
  */
 export function onAuthChange(callback: (user: User | null) => void): () => void {
   return onAuthStateChanged(auth, callback);
+}
+
+// ─── Change Password ──────────────────────────────────────────────────────────
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = auth.currentUser;
+  if (!user || !user.email) return { ok: false, error: 'Not signed in.' };
+  try {
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: mapAuthError(e) };
+  }
+}
+
+// ─── Firestore data helpers (cross-device persistence) ────────────────────────
+
+export type FSApplication = {
+  id: string; borrower: string; borrowerUid: string; amount: number; product: string;
+  term: number; status: string; isCustomAmount: boolean; submittedAt: string;
+  email?: string; phone?: string; dateOfBirth?: string; idType?: string; idNumber?: string;
+};
+
+export type FSLoan = {
+  id: string; borrower: string; borrowerUid: string; amount: number; interest: number;
+  term: number; remaining: number; status: string; approvedAt: string;
+};
+
+export type FSLoanProduct = {
+  id: string; name: string; description: string; minAmount: number; maxAmount: number;
+  defaultTerm: number; interestRate: number; purposes: string[];
+};
+
+// Applications
+export async function saveApplication(app: FSApplication): Promise<void> {
+  await setDoc(doc(db, 'applications', app.id), app);
+}
+export async function updateApplicationStatus(id: string, status: string): Promise<void> {
+  await setDoc(doc(db, 'applications', id), { status }, { merge: true });
+}
+export async function deleteApplication(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'applications', id));
+}
+export function listenApplications(callback: (apps: FSApplication[]) => void): () => void {
+  return onSnapshot(collection(db, 'applications'), (snap) => {
+    callback(snap.docs.map((d) => d.data() as FSApplication));
+  });
+}
+
+// Loans
+export async function saveLoan(loan: FSLoan): Promise<void> {
+  await setDoc(doc(db, 'loans', loan.id), loan);
+}
+export async function updateLoan(id: string, data: Partial<FSLoan>): Promise<void> {
+  await setDoc(doc(db, 'loans', id), data, { merge: true });
+}
+export async function deleteLoanDoc(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'loans', id));
+}
+export function listenLoans(callback: (loans: FSLoan[]) => void): () => void {
+  return onSnapshot(collection(db, 'loans'), (snap) => {
+    callback(snap.docs.map((d) => d.data() as FSLoan));
+  });
+}
+export function listenBorrowerLoan(uid: string, callback: (loan: FSLoan | null) => void): () => void {
+  const q = query(collection(db, 'loans'), where('borrowerUid', '==', uid));
+  return onSnapshot(q, (snap) => {
+    if (snap.empty) { callback(null); return; }
+    callback(snap.docs[0].data() as FSLoan);
+  });
+}
+
+// Loan Products
+export async function saveLoanProduct(product: FSLoanProduct): Promise<void> {
+  await setDoc(doc(db, 'loanProducts', product.id), product);
+}
+export async function deleteLoanProduct(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'loanProducts', id));
+}
+export function listenLoanProducts(callback: (products: FSLoanProduct[]) => void): () => void {
+  return onSnapshot(collection(db, 'loanProducts'), (snap) => {
+    if (snap.empty) return; // keep defaults if nothing in Firestore yet
+    callback(snap.docs.map((d) => d.data() as FSLoanProduct));
+  });
+}
+
+// Borrowers list (for admin)
+export function listenRegisteredBorrowers(
+  callback: (borrowers: { id: string; name: string; phone: string; email: string; activeLoans: number; status: string }[]) => void
+): () => void {
+  const q = query(collection(db, 'users'), where('role', '==', 'borrower'));
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => {
+      const data = d.data() as UserProfile;
+      return { id: data.uid, name: data.fullName, phone: data.phone || '—', email: data.email || '', activeLoans: 0, status: 'ACTIVE' };
+    }));
+  });
 }
 
 // ─── Firebase error → readable message ───────────────────────────────────────

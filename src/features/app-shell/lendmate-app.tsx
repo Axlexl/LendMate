@@ -4,7 +4,7 @@ import { Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Te
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import { acceptTerms, fetchUserProfile, handleGoogleResponse, onAuthChange, registerWithEmail, sendPasswordReset, signInWithEmail, signOut, useGoogleSignIn, type UserProfile } from '@/services/auth';
+import { acceptTerms, changePassword, deleteLoanProduct, fetchUserProfile, handleGoogleResponse, listenApplications, listenBorrowerLoan, listenLoanProducts, listenLoans, listenRegisteredBorrowers, onAuthChange, registerWithEmail, saveApplication, saveLoan, saveLoanProduct, sendPasswordReset, signInWithEmail, signOut, updateApplicationStatus, useGoogleSignIn, type UserProfile } from '@/services/auth';
 import { AppIcon, Avatar, BrandMark, Btn, DetailRow, InputField, LoadingOverlay, LogoutModal, NavBar, PageTitle, StatusBadge, TermsScreen } from './components';
 import { adminApplications, borrowers, defaultLoanProducts, initialAdminLoans, initials, money, seedReviews, todayLong, type AdminLoanRecord, type ApplicationRecord, type IconName, type LoanProduct, type Review, type Role, type Screen } from './model';
 import { createStyles } from './styles';
@@ -172,6 +172,73 @@ export default function LendMateApp() {
   const [lpPurposes, setLpPurposes] = useState<string[]>([]);
   const [lpNewPurpose, setLpNewPurpose] = useState('');
   const [lpFormError, setLpFormError] = useState('');
+  // ── Change Password state ─────────────────────────────────────────────────────
+  const [cpCurrentPassword, setCpCurrentPassword] = useState('');
+  const [cpNewPassword, setCpNewPassword] = useState('');
+  const [cpConfirmPassword, setCpConfirmPassword] = useState('');
+  const [cpLoading, setCpLoading] = useState(false);
+  const [cpError, setCpError] = useState('');
+  const [cpSuccess, setCpSuccess] = useState(false);
+  // ── Real-time date/time ────────────────────────────────────────────────────────
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+  const todayDisplay = now.toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const loanApprovedDate = now.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  // ── Firestore real-time listeners ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!firebaseUser) return;
+    // Listen to loan products (admin manages, users see)
+    const unsubLP = listenLoanProducts((products) => {
+      if (products.length > 0) setLoanProducts(products);
+    });
+    return () => { unsubLP(); };
+  }, [firebaseUser]);
+
+  useEffect(() => {
+    if (!firebaseUser) return;
+    if (firebaseUser.role === 'admin') {
+      // Admin listens to all applications
+      const unsubApps = listenApplications((apps) => {
+        setAdminApps(apps.map((a) => ({
+          id: a.id, borrower: a.borrower, borrowerUid: a.borrowerUid, amount: a.amount,
+          product: a.product, term: a.term, status: a.status as ApplicationRecord['status'],
+          isCustomAmount: a.isCustomAmount, submittedAt: a.submittedAt,
+          email: a.email, phone: a.phone, dateOfBirth: a.dateOfBirth, idType: a.idType, idNumber: a.idNumber,
+        })));
+      });
+      // Admin listens to all loans
+      const unsubLoans = listenLoans((loans) => {
+        setAdminLoans(loans.map((l) => ({
+          id: l.id, borrower: l.borrower, borrowerUid: l.borrowerUid, amount: l.amount,
+          interest: l.interest, term: l.term, remaining: l.remaining,
+          status: l.status as AdminLoanRecord['status'], approvedAt: l.approvedAt,
+        })));
+      });
+      // Admin listens to all registered borrowers from users collection
+      const unsubBorrowers = listenRegisteredBorrowers((bs) => {
+        setRegisteredBorrowers(bs);
+      });
+      return () => { unsubApps(); unsubLoans(); unsubBorrowers(); };
+    } else {
+      // Borrower listens to their own loan
+      const unsubLoan = listenBorrowerLoan(firebaseUser.uid, (loan) => {
+        if (loan) {
+          const loanRecord: AdminLoanRecord = {
+            id: loan.id, borrower: loan.borrower, borrowerUid: loan.borrowerUid,
+            amount: loan.amount, interest: loan.interest, term: loan.term,
+            remaining: loan.remaining, status: loan.status as 'ACTIVE' | 'PAID', approvedAt: loan.approvedAt,
+          };
+          setApprovedLoan(loanRecord);
+          setLoanRemaining(loan.remaining);
+        }
+      });
+      return () => { unsubLoan(); };
+    }
+  }, [firebaseUser]);
 
   const signIn = async () => {
     if (!email.includes('@') || password.length < 6) {
@@ -304,18 +371,36 @@ export default function LendMateApp() {
     const presets = [5000, 10000, 20000, 50000];
     const isCustomAmount = !presets.includes(amount);
     const appId = String(10026 + adminApps.filter((r) => Number(r.id) >= 10026).length);
+    const submittedAt = now.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
     const newApplication: ApplicationRecord = {
       id: appId,
       borrower: fullName,
+      borrowerUid: firebaseUser?.uid,
       amount,
       product: loanProduct,
       term: loanTerm,
       status: 'UNDER REVIEW',
       isCustomAmount,
+      submittedAt,
+      email: email,
+      phone: phone,
+      idType: idType || firebaseUser?.idType,
+      dateOfBirth: firebaseUser?.dateOfBirth,
+      idNumber: idNumber || firebaseUser?.idNumber,
     };
     setApplication(newApplication);
     setAdminApps((prev) => [{ ...newApplication, status: 'PENDING' }, ...prev]);
     setApplicationDecision(null);
+    // Persist to Firestore
+    saveApplication({
+      id: appId, borrower: fullName, borrowerUid: firebaseUser?.uid ?? '',
+      amount, product: loanProduct, term: loanTerm, status: 'PENDING',
+      isCustomAmount, submittedAt,
+      email: email || '', phone: phone || '',
+      idType: idType || firebaseUser?.idType || '',
+      dateOfBirth: firebaseUser?.dateOfBirth || '',
+      idNumber: idNumber || firebaseUser?.idNumber || '',
+    });
     goTo('application-status');
   };
 
@@ -323,42 +408,62 @@ export default function LendMateApp() {
     const updated = { ...record, status };
     setAdminApps((prev) => prev.map((item) => item.id === record.id ? updated : item));
     setSelectedApp(updated);
+    // Persist status update
+    updateApplicationStatus(record.id, status);
     if (application && record.id === application.id) {
       setApplication(updated);
       setApplicationDecision(status);
     }
     if (status === 'APPROVED') {
-      // Use admin-set rate for custom amounts, default 10% for preset amounts
       const adminRate = adminAppInterestRates[record.id];
       const ratePercent = record.isCustomAmount && adminRate
         ? Math.max(0, Math.min(100, Number(adminRate)))
         : 10;
       const interest = Math.round(record.amount * (ratePercent / 100));
       const totalPayable = record.amount + interest;
+      const approvedAt = now.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
       const newLoan: AdminLoanRecord = {
-        id: `1${record.id}`, borrower: record.borrower, amount: record.amount,
-        interest, term: record.term ?? 3, remaining: totalPayable, status: 'ACTIVE',
+        id: `1${record.id}`, borrower: record.borrower, borrowerUid: record.borrowerUid,
+        amount: record.amount, interest, term: record.term ?? 3,
+        remaining: totalPayable, status: 'ACTIVE', approvedAt,
       };
       setAdminLoans((prev) => [newLoan, ...prev]);
       setSelectedLoan(newLoan);
+      // Persist loan to Firestore
+      saveLoan({
+        id: newLoan.id, borrower: newLoan.borrower, borrowerUid: record.borrowerUid ?? '',
+        amount: newLoan.amount, interest: newLoan.interest, term: newLoan.term,
+        remaining: newLoan.remaining, status: 'ACTIVE', approvedAt,
+      });
       if (application?.id === record.id) {
         setApprovedLoan(newLoan);
         setLoanRemaining(totalPayable);
       }
-      // Notify the borrower that their loan was approved and first payment is due
+      // Ensure borrower appears in the borrowers list
+      if (record.borrowerUid) {
+        setRegisteredBorrowers((prev) => {
+          if (prev.some((b) => b.id === record.borrowerUid)) return prev;
+          return [{ id: record.borrowerUid!, name: record.borrower, phone: record.phone || '—', email: record.email || '', activeLoans: 1, status: 'ACTIVE' }, ...prev];
+        });
+      }
+      // Notify the borrower
       const installAmt = Math.ceil(totalPayable / (record.term ?? 3));
+      // Calculate next due date (1 month from now, same day)
+      const nextDue = new Date(now);
+      nextDue.setMonth(nextDue.getMonth() + 1);
+      const nextDueStr = nextDue.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
       setNotifications((prev) => [
         {
           id: `notif-approved-${record.id}`,
           title: 'Loan Approved!',
-          detail: `Your ${record.product} of ${money(record.amount)} has been approved. First payment: ${money(installAmt)}.`,
+          detail: `Your ${record.product} of ${money(record.amount)} was approved on ${approvedAt}. First payment: ${money(installAmt)}.`,
           icon: 'check' as const,
           read: false,
         },
         {
           id: `notif-due-${record.id}`,
           title: 'Payment Due Reminder',
-          detail: `Your first installment of ${money(installAmt)} is due at end of next month.`,
+          detail: `Your first installment of ${money(installAmt)} is due on ${nextDueStr}.`,
           icon: 'calendar' as const,
           read: false,
         },
@@ -1441,7 +1546,7 @@ export default function LendMateApp() {
             </View>
             <View style={sh.progressLabels}>
               <Text style={sh.progressLabel}>{paidPercent}% paid</Text>
-              <Text style={sh.progressLabel}>Released {todayLong}</Text>
+              <Text style={sh.progressLabel}>Released {approvedLoan.approvedAt ?? loanApprovedDate}</Text>
             </View>
           </View>
 
@@ -1597,26 +1702,36 @@ export default function LendMateApp() {
 
           <View style={[sh.scheduleBanner, { backgroundColor: p.greenPale }]}>
             <Text style={[sh.eyebrowSmall, { color: p.muted }]}>NEXT DUE</Text>
-            <Text style={[sh.scheduleDueDate, { color: p.navy }]}>Next installment</Text>
+            {(() => {
+              const nextDue = new Date(approvedLoan.approvedAt ? new Date(approvedLoan.approvedAt) : now);
+              nextDue.setMonth(nextDue.getMonth() + 1);
+              return <Text style={[sh.scheduleDueDate, { color: p.navy }]}>{nextDue.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}</Text>;
+            })()}
             <Text style={[sh.scheduleDueSub, { color: p.muted }]}>Estimated amount · {money(baseInstallment + (remainder > 0 ? 1 : 0))}</Text>
           </View>
 
           <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
-            {Array.from({ length: approvedLoan.term }, (_, idx) => idx + 1).map((item, i) => (
+            {Array.from({ length: approvedLoan.term }, (_, idx) => idx + 1).map((item, i) => {
+              // Calculate actual due date for each installment
+              const dueDate = new Date(approvedLoan.approvedAt ? new Date(approvedLoan.approvedAt) : now);
+              dueDate.setMonth(dueDate.getMonth() + item);
+              const dueDateStr = dueDate.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
+              return (
               <View key={item} style={[sh.installRow, i === approvedLoan.term - 1 && sh.installRowLast]}>
                 <View style={sh.installNum}>
                   <Text style={sh.installNumText}>{String(item).padStart(2, '0')}</Text>
                 </View>
                 <View style={sh.installCopy}>
                   <Text style={[sh.installTitle, { color: p.text }]}>Installment {item}</Text>
-                  <Text style={[sh.installDate, { color: p.muted }]}>Month {item} of {approvedLoan.term}</Text>
+                  <Text style={[sh.installDate, { color: p.muted }]}>Due {dueDateStr}</Text>
                 </View>
                 <View style={sh.installRight}>
                   <Text style={[sh.installAmount, { color: p.navy }]}>{money(baseInstallment + (item <= remainder ? 1 : 0))}</Text>
                   <Text style={[sh.installStatus, sh.pendingText]}>PENDING</Text>
                 </View>
               </View>
-            ))}
+              );
+            })}
           </View>
 
           <View style={[sh.callout, { backgroundColor: p.surface, borderColor: p.line }]}>
@@ -1711,6 +1826,9 @@ export default function LendMateApp() {
         <Header bell={false} />
         <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
           <View style={sh.pageTitleRow}>
+            <Pressable onPress={() => goTo(role === 'admin' ? 'admin-dashboard' : 'dashboard')} style={[sh.backBtn, { marginRight: 10 }]}>
+              <AppIcon name="back" size={20} color={p.navy} />
+            </Pressable>
             <View style={sh.pageTitleCopy}>
               <Text style={[sh.pageTitleText, { color: p.navy }]}>Notifications</Text>
               {unreadCount > 0 && (
@@ -1780,7 +1898,7 @@ export default function LendMateApp() {
         <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]}>
           <View style={sh.adminHead}>
             <Text style={[sh.adminTitle, { color: p.navy }]}>Portfolio Overview</Text>
-            <Text style={[sh.adminDate, { color: p.muted }]}>October 11, 2026</Text>
+            <Text style={[sh.adminDate, { color: p.muted }]}>{todayDisplay}</Text>
           </View>
 
           <View style={sh.statsGrid}>
@@ -1832,15 +1950,16 @@ export default function LendMateApp() {
           <View style={sh.sectionRow}>
             <Text style={[sh.sectionLabel, { color: p.navy }]}>Quick Access</Text>
           </View>
-          <View style={sh.quickGrid}>
+          <View style={[sh.quickGrid, { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }]}>
             {([
               ['file', 'Applications', 'admin-applications'],
               ['users', 'Borrowers', 'admin-borrowers'],
               ['wallet', 'Loans', 'admin-loans'],
               ['calendar', 'Payments', 'admin-payments'],
               ['star', 'Loan Products', 'admin-loan-products'],
+              ['shield', 'Reviews', 'admin-reviews'],
             ] as [IconName, string, Screen][]).map(([icon, label, dest]) => (
-              <Pressable key={label} onPress={() => goTo(dest)} style={({ pressed }) => [sh.quickCard, { backgroundColor: p.surface, borderColor: p.line }, pressed && sh.cardPressed]}>
+              <Pressable key={label} onPress={() => goTo(dest)} style={({ pressed }) => [sh.quickCard, { backgroundColor: p.surface, borderColor: p.line, width: '30.5%' }, pressed && sh.cardPressed]}>
                 <View style={[sh.quickIcon, { backgroundColor: p.greenPale }]}><AppIcon name={icon} size={19} color={p.green} /></View>
                 <Text style={[sh.quickLabel, { color: p.navy }]}>{label}</Text>
               </Pressable>
@@ -2061,10 +2180,22 @@ export default function LendMateApp() {
 
                 {isOpen && !appSelectMode && (
                   <View style={[sh.appCardExpanded, { borderTopColor: p.line }]}>
-                    <DetailRow label="Applicant" value={item.borrower} />
+                    {/* ── Applicant profile info ── */}
+                    <View style={{ marginBottom: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: p.line }}>
+                      <Text style={{ color: p.muted, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginBottom: 8 }}>APPLICANT INFO</Text>
+                      <DetailRow label="Full Name" value={item.borrower} />
+                      {item.email ? <DetailRow label="Email" value={item.email} /> : null}
+                      {item.phone ? <DetailRow label="Phone" value={item.phone} /> : null}
+                      {item.dateOfBirth ? <DetailRow label="Date of Birth" value={item.dateOfBirth} /> : null}
+                      {item.idType ? <DetailRow label="ID Type" value={item.idType} /> : null}
+                      {item.idNumber ? <DetailRow label="ID Number" value={item.idNumber} last /> : null}
+                    </View>
+                    {/* ── Loan details ── */}
+                    <Text style={{ color: p.muted, fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginBottom: 8 }}>LOAN DETAILS</Text>
                     <DetailRow label="Requested" value={money(item.amount)} />
                     <DetailRow label="Product" value={item.product} />
                     <DetailRow label="Term" value={`${item.term ?? 3} months`} />
+                    {item.submittedAt ? <DetailRow label="Submitted" value={item.submittedAt} /> : null}
                     <DetailRow label="Status" value={item.status} last />
 
                     {/* ── Custom amount: admin sets interest rate before approving ── */}
@@ -2815,7 +2946,12 @@ export default function LendMateApp() {
           ) : null}
 
           {/* ── Logout ───────────────────────────────────────────────── */}
-          <View style={{ marginTop: 16 }}>
+          <View style={{ marginTop: 16, gap: 10 }}>
+            <Btn title="Change Password" variant="secondary" onPress={() => {
+              setCpCurrentPassword(''); setCpNewPassword(''); setCpConfirmPassword('');
+              setCpError(''); setCpSuccess(false);
+              goTo('change-password');
+            }} />
             <Btn title="Log Out" variant="danger" onPress={() => setShowLogout(true)} />
           </View>
         </ScrollView>
@@ -2826,7 +2962,74 @@ export default function LendMateApp() {
     );
   };
 
-  // ── Admin Loan Products ───────────────────────────────────────────────────────
+  // ── Change Password ────────────────────────────────────────────────────────────
+  const renderChangePassword = () => (
+    <View style={[sh.flex, { backgroundColor: p.background }]}>
+      <Header bell={false} />
+      <ScrollView contentContainerStyle={[sh.page, { backgroundColor: p.background }]} keyboardShouldPersistTaps="handled">
+        <PageTitle title="Change Password" subtitle="Update your account password." onBack={() => goTo('profile')} />
+
+        <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line, padding: 16 }]}>
+          {cpSuccess ? (
+            <View style={{ alignItems: 'center', padding: 20, gap: 12 }}>
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: p.greenPale, alignItems: 'center', justifyContent: 'center' }}>
+                <AppIcon name="check" size={26} color={p.green} />
+              </View>
+              <Text style={{ color: p.navy, fontSize: 18, fontWeight: '800', textAlign: 'center' }}>Password Updated</Text>
+              <Text style={{ color: p.muted, fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
+                Your password has been changed successfully. Use your new password next time you sign in.
+              </Text>
+              <Btn title="Back to Profile" onPress={() => goTo('profile')} />
+            </View>
+          ) : (
+            <>
+              <InputField
+                label="Current Password"
+                value={cpCurrentPassword}
+                onChangeText={setCpCurrentPassword}
+                placeholder="Enter current password"
+                secureTextEntry
+              />
+              <InputField
+                label="New Password"
+                value={cpNewPassword}
+                onChangeText={setCpNewPassword}
+                placeholder="At least 6 characters"
+                secureTextEntry
+              />
+              <InputField
+                label="Confirm New Password"
+                value={cpConfirmPassword}
+                onChangeText={setCpConfirmPassword}
+                placeholder="Repeat new password"
+                secureTextEntry
+              />
+              {cpError ? (
+                <View style={[sh.errorBox, { backgroundColor: p.redPale, marginTop: 4 }]}>
+                  <Text style={[sh.errorText, { color: p.red }]}>{cpError}</Text>
+                </View>
+              ) : null}
+              <Btn
+                title={cpLoading ? 'Updating…' : 'Update Password'}
+                disabled={cpLoading}
+                onPress={async () => {
+                  if (!cpCurrentPassword) { setCpError('Enter your current password.'); return; }
+                  if (cpNewPassword.length < 6) { setCpError('New password must be at least 6 characters.'); return; }
+                  if (cpNewPassword !== cpConfirmPassword) { setCpError('Passwords do not match.'); return; }
+                  setCpLoading(true); setCpError('');
+                  const result = await changePassword(cpCurrentPassword, cpNewPassword);
+                  setCpLoading(false);
+                  if (result.ok) { setCpSuccess(true); } else { setCpError(result.error ?? 'Could not update password.'); }
+                }}
+              />
+            </>
+          )}
+        </View>
+      </ScrollView>
+    </View>
+  );
+
+  // ── Admin Loan Products ────────────────────────────────────────────────────────
   const renderAdminLoanProducts = () => {
     const openAdd = () => {
       setEditingProduct(null);
@@ -2844,6 +3047,7 @@ export default function LendMateApp() {
     };
     const deleteProd = (id: string) => {
       setLoanProducts((prev) => prev.filter((p) => p.id !== id));
+      deleteLoanProduct(id);
     };
     const removePurpose = (purpose: string) => {
       setLpPurposes((prev) => prev.filter((item) => item !== purpose));
@@ -2867,9 +3071,11 @@ export default function LendMateApp() {
       if (editingProduct) {
         const updated: LoanProduct = { ...editingProduct, name: lpName.trim(), description: lpDescription.trim(), minAmount: min, maxAmount: max, defaultTerm: term, interestRate: rate, purposes: lpPurposes };
         setLoanProducts((prev) => prev.map((x) => x.id === editingProduct.id ? updated : x));
+        saveLoanProduct(updated);
       } else {
         const newProd: LoanProduct = { id: `lp${Date.now()}`, name: lpName.trim(), description: lpDescription.trim(), minAmount: min, maxAmount: max, defaultTerm: term, interestRate: rate, purposes: lpPurposes };
         setLoanProducts((prev) => [...prev, newProd]);
+        saveLoanProduct(newProd);
       }
       setShowLoanProductForm(false);
       setEditingProduct(null);
@@ -2937,111 +3143,109 @@ export default function LendMateApp() {
           ))}
         </ScrollView>
 
-        {/* ── Add / Edit Modal ────────────────────────────────────────── */}
-        <Modal visible={showLoanProductForm} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setShowLoanProductForm(false)}>
-          <Pressable style={sh.modalBackdrop} onPress={() => setShowLoanProductForm(false)}>
-            <Pressable style={[sh.payModalCard, { backgroundColor: p.surface, maxHeight: '92%' }]} onPress={() => {}}>
-              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                <Text style={[sh.payModalTitle, { color: p.navy }]}>{editingProduct ? 'Edit Loan Product' : 'New Loan Product'}</Text>
-                <Text style={[sh.payModalSub, { color: p.muted }]}>{editingProduct ? 'Update the product details.' : 'Fill in details for the new loan offering.'}</Text>
+        {/* ── Add / Edit Modal — full screen for more space ────────── */}
+        <Modal visible={showLoanProductForm} transparent={false} animationType="slide" statusBarTranslucent onRequestClose={() => setShowLoanProductForm(false)}>
+          <SafeAreaView style={[sh.flex, { backgroundColor: p.background }]}>
+            {/* Modal header */}
+            <View style={[sh.header, { backgroundColor: p.surface, borderBottomColor: p.line }]}>
+              <Pressable onPress={() => { setShowLoanProductForm(false); setLpFormError(''); }} style={sh.backBtn}>
+                <AppIcon name="back" size={20} color={p.navy} />
+              </Pressable>
+              <Text style={{ flex: 1, color: p.navy, fontSize: 17, fontWeight: '800', marginLeft: 8 }}>
+                {editingProduct ? 'Edit Loan Product' : 'New Loan Product'}
+              </Text>
+              <Pressable
+                onPress={saveProduct}
+                style={({ pressed }) => [{ paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10, backgroundColor: pressed ? p.greenMid : p.green }]}
+              >
+                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>Save</Text>
+              </Pressable>
+            </View>
 
-                <View style={sh.fieldWrap}>
-                  <Text style={[sh.fieldLabel, { color: p.text }]}>Product Name *</Text>
-                  <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
-                    <TextInput value={lpName} onChangeText={setLpName} placeholder="e.g. Personal Loan" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
+            <ScrollView contentContainerStyle={[sh.page, { paddingTop: 20 }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <Text style={{ color: p.muted, fontSize: 13, marginBottom: 16, lineHeight: 18 }}>
+                {editingProduct ? 'Update the product details below.' : 'Fill in the details for the new loan offering.'}
+              </Text>
+
+              <InputField label="Product Name *" value={lpName} onChangeText={setLpName} placeholder="e.g. Personal Loan" />
+              <InputField label="Description" value={lpDescription} onChangeText={setLpDescription} placeholder="Short description of the product" />
+
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 4 }}>
+                <View style={{ flex: 1 }}>
+                  <InputField label="Min Amount (₱) *" value={lpMinAmount} onChangeText={setLpMinAmount} placeholder="1000" keyboardType="numeric" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <InputField label="Max Amount (₱) *" value={lpMaxAmount} onChangeText={setLpMaxAmount} placeholder="500000" keyboardType="numeric" />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 4 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[sh.fieldLabel, { color: p.text, marginBottom: 6 }]}>Default Term (mo) *</Text>
+                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+                    {[3, 6, 12].map((t) => (
+                      <Pressable key={t} onPress={() => setLpDefaultTerm(String(t))}
+                        style={[sh.termChip, { flex: 1 }, String(t) === lpDefaultTerm && sh.termChipActive]}>
+                        <Text style={[sh.termChipNum, String(t) === lpDefaultTerm && sh.termChipNumActive]}>{t}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <View style={[sh.inputWrap, { backgroundColor: p.surface, borderColor: p.line }]}>
+                    <TextInput value={lpDefaultTerm} onChangeText={setLpDefaultTerm} placeholder="Custom" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
                   </View>
                 </View>
-
-                <View style={sh.fieldWrap}>
-                  <Text style={[sh.fieldLabel, { color: p.text }]}>Description</Text>
-                  <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
-                    <TextInput value={lpDescription} onChangeText={setLpDescription} placeholder="Short description" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[sh.fieldLabel, { color: p.text, marginBottom: 6 }]}>Interest Rate (%) *</Text>
+                  <View style={[sh.amountRow, { backgroundColor: p.surface, borderColor: p.line, marginTop: 0, height: 50 }]}>
+                    <TextInput value={lpInterestRate} onChangeText={setLpInterestRate} placeholder="10" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.amountInput, { color: p.navy }]} />
+                    <Text style={{ color: p.muted, fontSize: 16, fontWeight: '700', marginLeft: 4 }}>%</Text>
                   </View>
                 </View>
+              </View>
 
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <View style={[sh.fieldWrap, { flex: 1 }]}>
-                    <Text style={[sh.fieldLabel, { color: p.text }]}>Min Amount (₱) *</Text>
-                    <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
-                      <TextInput value={lpMinAmount} onChangeText={setLpMinAmount} placeholder="1000" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
-                    </View>
-                  </View>
-                  <View style={[sh.fieldWrap, { flex: 1 }]}>
-                    <Text style={[sh.fieldLabel, { color: p.text }]}>Max Amount (₱) *</Text>
-                    <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
-                      <TextInput value={lpMaxAmount} onChangeText={setLpMaxAmount} placeholder="500000" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
-                    </View>
-                  </View>
-                </View>
-
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <View style={[sh.fieldWrap, { flex: 1 }]}>
-                    <Text style={[sh.fieldLabel, { color: p.text }]}>Default Term (mo) *</Text>
-                    <View style={sh.termRow}>
-                      {[3, 6, 12].map((t) => (
-                        <Pressable key={t} onPress={() => setLpDefaultTerm(String(t))}
-                          style={[sh.termChip, { flex: 0, width: 48 }, String(t) === lpDefaultTerm && sh.termChipActive]}>
-                          <Text style={[sh.termChipNum, String(t) === lpDefaultTerm && sh.termChipNumActive]}>{t}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                    <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line, marginTop: 6 }]}>
-                      <TextInput value={lpDefaultTerm} onChangeText={setLpDefaultTerm} placeholder="6" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
-                    </View>
-                  </View>
-                  <View style={[sh.fieldWrap, { flex: 1 }]}>
-                    <Text style={[sh.fieldLabel, { color: p.text }]}>Interest Rate (%) *</Text>
-                    <View style={[sh.inputWrap, { backgroundColor: p.background, borderColor: p.line }]}>
-                      <TextInput value={lpInterestRate} onChangeText={setLpInterestRate} placeholder="10" keyboardType="numeric" placeholderTextColor={p.mutedLight} style={[sh.inputInner, { color: p.text }]} />
-                    </View>
-                  </View>
-                </View>
-
-                {/* Purposes */}
-                <View style={sh.fieldWrap}>
-                  <Text style={[sh.fieldLabel, { color: p.text }]}>Loan Purposes</Text>
-                  <View style={sh.pillRow}>
+              {/* Purposes */}
+              <View style={[sh.fieldWrap, { marginTop: 8 }]}>
+                <Text style={[sh.fieldLabel, { color: p.text }]}>Loan Purposes</Text>
+                <Text style={[sh.fieldHint, { color: p.mutedLight }]}>These will appear as quick-select options for borrowers.</Text>
+                {lpPurposes.length > 0 && (
+                  <View style={[sh.pillRow, { marginBottom: 10 }]}>
                     {lpPurposes.map((purpose) => (
                       <Pressable key={purpose} onPress={() => removePurpose(purpose)}
                         style={[sh.pill, { backgroundColor: p.greenPale, borderColor: p.green, flexDirection: 'row', gap: 4, alignItems: 'center' }]}>
                         <Text style={[sh.pillText, { color: p.greenDark }]}>{purpose}</Text>
-                        <Text style={{ color: p.red, fontSize: 14, fontWeight: '800', lineHeight: 16 }}>×</Text>
+                        <Text style={{ color: p.red, fontSize: 15, fontWeight: '800', lineHeight: 16 }}>×</Text>
                       </Pressable>
                     ))}
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                    <View style={[sh.inputWrap, { flex: 1, backgroundColor: p.background, borderColor: p.line }]}>
-                      <TextInput
-                        value={lpNewPurpose}
-                        onChangeText={setLpNewPurpose}
-                        placeholder="Add a purpose…"
-                        placeholderTextColor={p.mutedLight}
-                        style={[sh.inputInner, { color: p.text }]}
-                        onSubmitEditing={addPurpose}
-                        returnKeyType="done"
-                      />
-                    </View>
-                    <Pressable onPress={addPurpose} style={({ pressed }) => [{ paddingHorizontal: 16, height: 50, borderRadius: 11, backgroundColor: pressed ? p.greenMid : p.green, alignItems: 'center', justifyContent: 'center' }]}>
-                      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>Add</Text>
-                    </Pressable>
+                )}
+                <View style={{ flexDirection: 'row', gap: 10 }}>
+                  <View style={[sh.inputWrap, { flex: 1, backgroundColor: p.surface, borderColor: p.line }]}>
+                    <TextInput
+                      value={lpNewPurpose}
+                      onChangeText={setLpNewPurpose}
+                      placeholder="Add purpose (e.g. Medical)"
+                      placeholderTextColor={p.mutedLight}
+                      style={[sh.inputInner, { color: p.text }]}
+                      onSubmitEditing={addPurpose}
+                      returnKeyType="done"
+                    />
                   </View>
-                </View>
-
-                {lpFormError ? <View style={[sh.errorBox, { backgroundColor: p.redPale, marginBottom: 6 }]}><Text style={[sh.errorText, { color: p.red }]}>{lpFormError}</Text></View> : null}
-
-                <View style={sh.modalActions}>
-                  <Pressable style={({ pressed }) => [sh.modalBtnCancel, { backgroundColor: p.background, borderColor: p.line }, pressed && { opacity: 0.7 }]}
-                    onPress={() => { setShowLoanProductForm(false); setLpFormError(''); }}>
-                    <Text style={[sh.modalBtnCancelText, { color: p.text }]}>Cancel</Text>
-                  </Pressable>
-                  <Pressable style={({ pressed }) => [sh.modalBtnConfirm, pressed && sh.modalBtnConfirmPressed]}
-                    onPress={saveProduct}>
-                    <Text style={sh.modalBtnConfirmText}>{editingProduct ? 'Save Changes' : 'Create Product'}</Text>
+                  <Pressable onPress={addPurpose} style={({ pressed }) => [{ paddingHorizontal: 18, height: 50, borderRadius: 11, backgroundColor: pressed ? p.greenMid : p.green, alignItems: 'center', justifyContent: 'center' }]}>
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 15 }}>Add</Text>
                   </Pressable>
                 </View>
-              </ScrollView>
-            </Pressable>
-          </Pressable>
+              </View>
+
+              {lpFormError ? (
+                <View style={[sh.errorBox, { backgroundColor: p.redPale, marginBottom: 8 }]}>
+                  <Text style={[sh.errorText, { color: p.red }]}>{lpFormError}</Text>
+                </View>
+              ) : null}
+
+              <Btn title={editingProduct ? 'Save Changes' : 'Create Product'} onPress={saveProduct} />
+              <Btn title="Cancel" variant="ghost" onPress={() => { setShowLoanProductForm(false); setLpFormError(''); }} />
+            </ScrollView>
+          </SafeAreaView>
         </Modal>
 
         <NavBar role="admin" screen={screen} onSelect={goTo} />
@@ -3069,6 +3273,7 @@ export default function LendMateApp() {
   else if (screen === 'terms') content = renderTerms();
   else if (screen === 'review') content = renderReview();
   else if (screen === 'profile') content = renderProfile();
+  else if (screen === 'change-password') content = renderChangePassword();
   else if (screen === 'dashboard') content = renderDashboard();
   else if (screen === 'apply') content = renderApply();
   else if (screen === 'application-status') content = renderAppStatus();

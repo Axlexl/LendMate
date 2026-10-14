@@ -4,7 +4,7 @@ export type Role = 'borrower' | 'admin';
 export type Screen =
   | 'splash' | 'login' | 'register' | 'terms' | 'underage'
   | 'dashboard' | 'apply' | 'application-status' | 'loan-details'
-  | 'schedule' | 'payments' | 'notifications' | 'review' | 'profile'
+  | 'schedule' | 'payments' | 'notifications' | 'review' | 'profile' | 'change-password'
   | 'admin-dashboard' | 'admin-applications' | 'admin-borrowers'
   | 'admin-borrower-detail' | 'admin-loans' | 'admin-reviews' | 'admin-payments'
   | 'admin-loan-products';
@@ -34,16 +34,19 @@ export type Review = {
 };
 
 export type ApplicationRecord = {
-  id: string; borrower: string; amount: number; product: string;
+  id: string; borrower: string; borrowerUid?: string; amount: number; product: string;
   term?: number;
   status: 'PENDING' | 'UNDER REVIEW' | 'APPROVED' | 'REJECTED';
-  isCustomAmount?: boolean;   // true when amount wasn't from preset choices
-  adminInterestRate?: number; // 0–100, set by admin before approving custom amounts
+  isCustomAmount?: boolean;
+  adminInterestRate?: number;
+  submittedAt?: string;
+  // applicant profile info fetched from Firestore
+  email?: string; phone?: string; dateOfBirth?: string; idType?: string; idNumber?: string;
 };
 
 export type AdminLoanRecord = {
-  id: string; borrower: string; amount: number; interest: number;
-  term: number; remaining: number; status: 'ACTIVE' | 'PAID';
+  id: string; borrower: string; borrowerUid?: string; amount: number; interest: number;
+  term: number; remaining: number; status: 'ACTIVE' | 'PAID'; approvedAt?: string;
 };
 
 // ─── Seed data ────────────────────────────────────────────────────────────────
