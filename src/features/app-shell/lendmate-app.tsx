@@ -143,6 +143,16 @@ export default function LendMateApp() {
   const [appSelectMode, setAppSelectMode] = useState(false);
   const [borrowerSelectMode, setBorrowerSelectMode] = useState(false);
   const [reviewSelectMode, setReviewSelectMode] = useState(false);
+  // ── Loan list select/delete state ────────────────────────────────────────────
+  const [loanSelectMode, setLoanSelectMode] = useState(false);
+  const [selectedLoanIds, setSelectedLoanIds] = useState<Set<string>>(new Set());
+  // ── Loan edit state ───────────────────────────────────────────────────────────
+  const [loanEditMode, setLoanEditMode] = useState(false);
+  const [editAmount, setEditAmount] = useState('');
+  const [editInterestRate, setEditInterestRate] = useState('');
+  const [editTerm, setEditTerm] = useState('');
+  const [editStatus, setEditStatus] = useState<'ACTIVE' | 'PAID'>('ACTIVE');
+  const [editError, setEditError] = useState('');
 
   const signIn = async () => {
     if (!email.includes('@') || password.length < 6) {
@@ -2143,8 +2153,6 @@ export default function LendMateApp() {
 
   // ── Admin Loans ───────────────────────────────────────────────────────────────
   const renderAdminLoans = () => {
-    const [loanSelectMode, setLoanSelectMode] = React.useState(false);
-    const [selectedLoanIds, setSelectedLoanIds] = React.useState<Set<string>>(new Set());
     const toggleSelectLoan = (id: string) =>
       setSelectedLoanIds((prev) => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
     const deleteSelected = () => {
@@ -2248,15 +2256,19 @@ export default function LendMateApp() {
       );
     }
 
-    // Local edit state
-    const [editMode, setEditMode] = React.useState(false);
-    const [editAmount, setEditAmount] = React.useState(String(selectedLoan.amount));
-    const [editInterestRate, setEditInterestRate] = React.useState(
-      String(Math.round((selectedLoan.interest / selectedLoan.amount) * 100))
-    );
-    const [editTerm, setEditTerm] = React.useState(String(selectedLoan.term));
-    const [editStatus, setEditStatus] = React.useState<'ACTIVE' | 'PAID'>(selectedLoan.status);
-    const [editError, setEditError] = React.useState('');
+    // Local edit state — using top-level state (hooks can't be inside render functions)
+    // editMode, editAmount, editInterestRate, editTerm, editStatus, editError are declared at component top
+
+    const enterEditMode = () => {
+      setEditAmount(String(selectedLoan.amount));
+      setEditInterestRate(String(Math.round((selectedLoan.interest / selectedLoan.amount) * 100)));
+      setEditTerm(String(selectedLoan.term));
+      setEditStatus(selectedLoan.status);
+      setEditError('');
+      setLoanEditMode(true);
+    };
+
+    const cancelEdit = () => { setLoanEditMode(false); setEditError(''); };
 
     const saveChanges = () => {
       const amount = Number(editAmount.replace(/,/g, ''));
@@ -2301,10 +2313,10 @@ export default function LendMateApp() {
             </View>
             <Pressable
               onPress={() => { setEditMode((v) => !v); setEditError(''); }}
-              style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9, borderWidth: 1.5, borderColor: editMode ? p.muted : p.green, backgroundColor: editMode ? p.background : p.greenPale }}
+              style={{ paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9, borderWidth: 1.5, borderColor: loanEditMode ? p.muted : p.green, backgroundColor: loanEditMode ? p.background : p.greenPale }}
             >
-              <Text style={{ color: editMode ? p.muted : p.greenDark, fontSize: 13, fontWeight: '700' }}>
-                {editMode ? 'Cancel' : 'Edit Loan'}
+              <Text style={{ color: loanEditMode ? p.muted : p.greenDark, fontSize: 13, fontWeight: '700' }}>
+                {loanEditMode ? 'Cancel' : 'Edit Loan'}
               </Text>
             </Pressable>
           </View>
@@ -2325,7 +2337,7 @@ export default function LendMateApp() {
           </View>
 
           {/* ── View mode ─────────────────────────────────────────────── */}
-          {!editMode ? (
+          {!loanEditMode ? (
             <View style={[sh.detailCard, { backgroundColor: p.surface, borderColor: p.line }]}>
               <DetailRow label="Borrower" value={selectedLoan.borrower} />
               <DetailRow label="Principal" value={money(selectedLoan.amount)} />
@@ -2434,7 +2446,7 @@ export default function LendMateApp() {
           )}
 
           {/* Actions */}
-          {!editMode && (
+          {!loanEditMode && (
             <>
               <Btn title="Payment History" onPress={() => goTo('payments')} variant="secondary" />
               <View style={{ marginTop: 10 }}>
@@ -2680,3 +2692,4 @@ export default function LendMateApp() {
     </ThemeContext.Provider>
   );
 }
+
